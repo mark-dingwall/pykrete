@@ -1,0 +1,3 @@
+# Salvaged ancestor-project material (pi v0.70.2 bench). Not Pykrete's own code —
+# exclude from GitHub language stats and collapse in diffs.
+.research/llm-bench-ancestor-2026-04-26/** linguist-vendored
