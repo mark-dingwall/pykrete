@@ -1,0 +1,52 @@
+# Pykrete config. Copy to `pykrete.toml` in the directory you run from, or pass
+# `--config <path>`. Without it, Pykrete exits 1 with "cannot read config at pykrete.toml".
+#
+# PREREQUISITES
+#   1. `pi` on PATH (npm i -g @earendil-works/pi-coding-agent@0.80.10), or set PYKRETE_PI_BIN.
+#   2. NANOGPT_API_KEY exported in the environment.
+#
+# Pykrete does NOT read .env — nothing loads it for you. If you keep the key there:
+#   set -a; . ./.env; set +a
+# An unset key is not a clean error: the catalog reorder is skipped with a warning, then pi
+# fails its auth preflight and exits with no terminal JSON event ("No API key found for nanogpt").
+#
+# Invocation: pykrete [--task <task>] [--family <family>] [--config <path>] "<prompt>"
+
+# Family used when --family is omitted. Must be a key in [families].
+default_family = "glm"
+
+[catalog]
+# How long the NanoGPT model catalog is cached before it is re-fetched, in seconds.
+ttl_seconds = 3600
+
+# Candidate chains, in failover order — Pykrete tries each id in turn. Track FAMILIES, not
+# pinned versions: NanoGPT ids move fast, and a dead id costs a failover hop on every run.
+# Verify ids against https://nano-gpt.com/api/v1/models before committing them.
+[families]
+glm = ["zai-org/glm-5.2:thinking", "zai-org/glm-5.2", "zai-org/glm-5.1:thinking"]
+kimi = ["moonshotai/kimi-k2.6:thinking", "moonshotai/kimi-k2.7-code"]
+deepseek = ["deepseek/deepseek-v4-pro-cheaper:thinking", "deepseek/deepseek-v4-pro-cheaper"]
+
+# Per-task lead model, selected by `--task`. The chosen id is tried first, then `general`'s
+# pick, then the rest of the family list. Every id here must appear in its family's list above.
+# `general` is the fallback task when --task is omitted or names no entry here.
+[defaults.general]
+glm = "zai-org/glm-5.2"
+kimi = "moonshotai/kimi-k2.6:thinking"
+deepseek = "deepseek/deepseek-v4-pro-cheaper"
+
+[defaults.code]
+glm = "zai-org/glm-5.2:thinking"
+kimi = "moonshotai/kimi-k2.7-code"
+deepseek = "deepseek/deepseek-v4-pro-cheaper:thinking"
+
+# Transport liveness. Defaults apply if this table is omitted entirely.
+[liveness]
+# Inject a sentinel nonce and resume if it is missing from the terminal message.
+nonce_enabled = true
+# Idle watchdog. Keep this ABOVE 300: pi's own undici HTTP idle window is 300s, and this
+# deliberately sits outside it so pi self-heals first. A lower value kills a healthy pi
+# mid-request — the exact failure the watchdog exists to prevent. Not currently enforced.
+idle_timeout_seconds = 330
+# Resume attempts per candidate after a missing nonce or an idle trip.
+resume_attempts = 1
