@@ -1,19 +1,40 @@
 # Pykrete backlog
 
-Items deferred from the Spec B failover state machine (pre-merge multi-AI review, 2026-07-01).
-Not blocking merge; recorded so future reviews don't re-discover them cold.
+Nothing here is blocking; recorded so future reviews don't re-discover it cold. Items came in
+from the Spec B failover review (2026-07-01) and later passes — each entry dates its own source.
 
-## Follow-up branch (transport liveness — decided 2026-07-01)
-- **Sentinel-nonce → `pi --continue` resume.** A genuine terminal silent-stop (stopReason `stop`/
-  `length` with empty/partial reconstructed text) still reports exit 0 today. The in-scope liveness
-  mechanism (design doc l.218–222) is nonce injection + nonce-missing → state-aware resume; it is a
-  whole feature, deferred to its own branch. The *truncation-before-terminal* case is already
-  handled (terminal-only stopReason latch → ambiguous → failover).
-- **Idle / no-progress watchdog.** A mid-inference model stall (pi emits `agent_start` ~700 ms before
-  contacting the model, disarming the startup watchdog) is caught only by the overall timer →
-  surfaced as exit 1, not failed over. Add a no-progress watchdog (kill + classify model-unavailable
-  when `idleMs` exceeds a cap before any output). Existing "Known v1 boundary" in the design doc.
-- **Live streaming** of `message_update` token deltas to stdout (design doc l.247).
+## Transport liveness
+Sentinel-nonce → `pi --continue` resume and the idle / no-progress watchdog were both delivered on
+the liveness branch and **merged 2026-07-11** (`runCandidate.ts` resume loop; `launch.ts` idle
+timer). Design: `docs/superpowers/specs/2026-06-29-launcher-failover-design.md` l.218–222.
+
+Still outstanding from that design:
+- **Live streaming** of `message_update` token deltas to stdout (design doc l.247). Pykrete buffers
+  the run and prints only the reconstructed terminal text, so a long run shows nothing until it ends.
+
+## Setup / operability
+(2026-07-21, found while bringing a clean host up to a working state.)
+- **`pi` is an undeclared runtime dependency.** `launch.ts` resolves a bare `"pi"` on PATH (or
+  `PYKRETE_PI_BIN`); nothing in `package.json` declares or version-checks it. The four pi contracts
+  are verified against **0.80.10** only — a host with an older or newer pi fails at spawn time or,
+  worse, silently drifts off-contract. Consider a startup version probe.
+- **Pykrete does not read `.env`.** `NANOGPT_API_KEY` must already be exported. An unset key is not
+  a clean error: the catalog reorder is skipped with a warning, then pi fails its auth preflight and
+  exits with **no terminal JSON event at all**, so the run surfaces as an opaque failure. Either load
+  `.env`, or preflight the key in `bin` and exit 2 with a clear message.
+
+## Correctness
+- **`extensions/flat-edit.ts` is never loaded — R3 is live in production.** The extension was
+  committed alongside the June experiment tooling and validated 3/3 e2e, but nothing wires it
+  in: `agentdir.ts` writes only `models.json` + `settings.json`, and `launch.ts` passes no extension
+  or `--tools` args. So pi's built-in `edit` tool, with its nested `edits[].oldText` schema, is what
+  DeepSeek-via-NanoGPT actually gets — the exact deterministic DSML failure the extension exists to
+  fix. Reproduced 2026-07-21 on pi 0.80.10: editing an existing file via `--family deepseek` fails
+  with *"Upstream emitted malformed tool call data that could not be repaired"*, exit 1, file
+  unchanged; the identical task on `--family glm` succeeds. Only *edits* are affected — creating a
+  file uses `write` and works, which is why the smoke tests missed it.
+  Wiring it also needs the `--tools` allowlist caveat honoured: a custom override is SILENTLY
+  inactive unless `edit` stays in the allowlist (pi sdk.ts:249).
 
 ## Reliability / robustness
 - **Process-group / detached grandchild kill.** The hang backstop force-resolves and unrefs, so the
@@ -23,6 +44,12 @@ Not blocking merge; recorded so future reviews don't re-discover them cold.
   escapes `main()` as an unhandled rejection (Node prints a stack trace, exits 1). Exit code is
   contract-correct; catch it in bin for a clean `pykrete: …` message instead.
 - **Cap stderr accumulation.** `launch.ts` grows `stderr` unbounded; keep only the last N KB.
+- **Enforce a floor on `idle_timeout_seconds`.** `config.ts` validates only "positive integer", so a
+  configured `90` is accepted even though the D1 invariant requires the idle watchdog to sit outside
+  pi's 300s undici HTTP-idle window (hence the 330s default). Below that floor Pykrete kills a healthy
+  pi mid-request — the exact failure the watchdog exists to prevent. Reject `< 330`, or warn loudly.
+  (Raised as MEDIUM in the 2026-07-10 liveness plan red-team; the only finding from that pass not
+  applied before merge.)
 
 ## Tests / observability
 - **bin exit-1 e2e** (fatal/transient run-error) case — the matrix covers 0/2/3/4 but not 1.
@@ -30,6 +57,11 @@ Not blocking merge; recorded so future reviews don't re-discover them cold.
   can't regress onto stdout.
 - classify: assert the `.message` field on fatal/transient verdicts; `parseStatus` anchor guard test;
   unknown-`stopReason` coverage.
+- **`agentdir.test.ts` guards check key NAMES, not pi's schema constraints.** The transcribed key
+  sets catch an unknown/removed key, but not TypeBox value constraints — a mutation setting
+  `baseUrl: ""` still passed a test named "...schema accept". Either narrow the naming to "key
+  compatibility", or get real validation from the gated `npm run test:e2e` real-binary run.
+  (Round-1 review of the 0.80.10 guards, 2026-07-20; Minor.)
 
 ## Dead surface
 - `AttemptOutcome.exitCode` / `signal` are populated but unused by any caller (exit code is
