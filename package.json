@@ -2,6 +2,7 @@
   "name": "pykrete",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
   "bin": { "pykrete": "bin/pykrete.ts" },
   "engines": { "node": ">=22.18" },
   "scripts": {

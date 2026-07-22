@@ -116,3 +116,7 @@ extensions/        pi extensions (flat-edit — NOT currently wired in; see back
 ```
 
 Only `smol-toml` is a runtime dependency.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
