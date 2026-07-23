@@ -41,6 +41,11 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<number> {
+  // An empty shell export counts as "existing" to loadEnvFile and would silently block a valid
+  // .env value below, then fail with a misleading "not set" message. Treat empty as absent. Must
+  // precede loadEnvFile(): it treats an already-present (even empty) shell value as set and won't
+  // overwrite it from .env.
+  if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
   const preEnvKeys = new Set(Object.keys(process.env));
   try {
     process.loadEnvFile();

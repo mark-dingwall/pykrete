@@ -45,10 +45,11 @@ fails with "Upstream emitted malformed tool call data that could not be repaired
 extension is active because it's in the tree.
 
 **`bin/pykrete.ts` loads `.env`, but only the CLI path.** It calls `process.loadEnvFile()` before
-anything else and preflights `NANOGPT_API_KEY`, exiting 2 with a clear message if it's absent — shell
-env still wins if both are set. This check is deliberately unconditional, not scoped by
+anything else and preflights `NANOGPT_API_KEY`, exiting 2 with a clear message if it's absent — a
+non-empty shell env still wins if both are set (an empty shell export is treated as absent, so it
+doesn't silently shadow a valid `.env` value). This check is deliberately unconditional, not scoped by
 `PYKRETE_PI_BIN`: every invocation talks to NanoGPT regardless of which `pi` binary is spawned
-(`agentdir.ts` hardcodes the `nanogpt` provider into `settings.json` either way), so a substituted
+(`agentdir.ts` hardcodes the `nanogpt` provider into `models.json` either way), so a substituted
 binary is not exempt from needing a real key. The e2e suite (`classify.e2e.test.ts`,
 `config.e2e.test.ts`) reads `NANOGPT_API_KEY`/`PYKRETE_NANOGPT_API_KEY` straight from `process.env` and
 never goes through `bin/pykrete.ts`, so `.env` support does **not** reach it — the key must still be
