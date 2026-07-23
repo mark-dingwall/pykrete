@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync, spawn, type SpawnSyncReturns } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 
@@ -28,7 +28,7 @@ function runBin(config: string, prompt: string): SpawnSyncReturns<string> {
   return spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", config, prompt],
-    { encoding: "utf-8", env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "" } },
+    { encoding: "utf-8", env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
   );
 }
 
@@ -36,7 +36,7 @@ function runBinStdin(config: string, input: string): SpawnSyncReturns<string> {
   return spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", config, "-"],
-    { input, encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "" } },
+    { input, encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
   );
 }
 
@@ -62,7 +62,7 @@ test("missing prompt: exit 2", () => {
   const r = spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", writeConfig(["good-ok"])],
-    { input: "", encoding: "utf-8", env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "" } },
+    { input: "", encoding: "utf-8", env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
   );
   assert.equal(r.status, 2);
 });
@@ -78,7 +78,7 @@ test("prompt omitted while stdin is piped (non-TTY) is read from stdin", () => {
   const r = spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", writeConfig(["echolen"])],
-    { input: "z".repeat(50_000), encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "" } },
+    { input: "z".repeat(50_000), encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
   );
   assert.equal(r.status, 0);
   assert.match(r.stdout, /LEN 50000\b/);
@@ -135,7 +135,7 @@ test("end-to-end resume: attempt 1 writes a .jsonl and stops without the nonce; 
       const child = spawn(
         "node",
         ["--experimental-strip-types", BIN, "--config", path, "do it"],
-        { env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_MODELS_URL: `http://127.0.0.1:${port}/models` } },
+        { env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1", PYKRETE_MODELS_URL: `http://127.0.0.1:${port}/models` } },
       );
       let out = "";
       child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf-8"); });
@@ -148,4 +148,16 @@ test("end-to-end resume: attempt 1 writes a .jsonl and stops without the nonce; 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("no NANOGPT_API_KEY, no .env in cwd: exit 2", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const configPath = writeConfig(["good-ok"]); // absolute path, in a fresh empty tmpdir
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    { encoding: "utf-8", env: rest, cwd: dirname(configPath) },
+  );
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /NANOGPT_API_KEY/);
 });

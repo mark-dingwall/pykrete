@@ -41,6 +41,16 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<number> {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // no .env in cwd; NANOGPT_API_KEY must already be exported
+  }
+  if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
+    console.error("pykrete: NANOGPT_API_KEY is not set (checked the environment and .env)");
+    return 2;
+  }
+
   let resolved;
   try {
     resolved = await run(process.argv.slice(2));

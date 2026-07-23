@@ -18,10 +18,6 @@ Still outstanding from that design:
   `PYKRETE_PI_BIN`); nothing in `package.json` declares or version-checks it. The four pi contracts
   are verified against **0.80.10** only — a host with an older or newer pi fails at spawn time or,
   worse, silently drifts off-contract. Consider a startup version probe.
-- **Pykrete does not read `.env`.** `NANOGPT_API_KEY` must already be exported. An unset key is not
-  a clean error: the catalog reorder is skipped with a warning, then pi fails its auth preflight and
-  exits with **no terminal JSON event at all**, so the run surfaces as an opaque failure. Either load
-  `.env`, or preflight the key in `bin` and exit 2 with a clear message.
 
 ## Correctness
 - **`extensions/flat-edit.ts` is never loaded — R3 is live in production.** The extension was

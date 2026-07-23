@@ -44,9 +44,15 @@ schema. Creating files works (that's `write`); *editing* an existing file with `
 fails with "Upstream emitted malformed tool call data that could not be repaired". Don't assume the
 extension is active because it's in the tree.
 
-**Nothing loads `.env`.** `NANOGPT_API_KEY` must already be exported, for both the CLI and the e2e
-suite. A missing key does not fail cleanly — pi dies in its auth preflight and emits no terminal JSON
-event at all, so the run surfaces as an opaque failure rather than "no API key".
+**`bin/pykrete.ts` loads `.env`, but only the CLI path.** It calls `process.loadEnvFile()` before
+anything else and preflights `NANOGPT_API_KEY`, exiting 2 with a clear message if it's absent — shell
+env still wins if both are set. This check is deliberately unconditional, not scoped by
+`PYKRETE_PI_BIN`: every invocation talks to NanoGPT regardless of which `pi` binary is spawned
+(`agentdir.ts` hardcodes the `nanogpt` provider into `settings.json` either way), so a substituted
+binary is not exempt from needing a real key. The e2e suite (`classify.e2e.test.ts`,
+`config.e2e.test.ts`) reads `NANOGPT_API_KEY`/`PYKRETE_NANOGPT_API_KEY` straight from `process.env` and
+never goes through `bin/pykrete.ts`, so `.env` support does **not** reach it — the key must still be
+exported directly in the shell for `npm run test:e2e`.
 
 **A network outage has no HTTP status.** It arrives as `errorMessage: "Connection error."` and
 classifies as `ambiguous`. `runCandidate` probes reachability before failing over on `ambiguous`,
