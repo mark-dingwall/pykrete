@@ -45,6 +45,10 @@ if (model.includes("stall")) {
 } else if (model.includes("dumpargs")) {
   emit({ type: "agent_start" });
   assistant({ content: [{ type: "text", text: argv.join(" ") }], stopReason: "stop" });
+} else if (model.includes("dumpenv")) {
+  emit({ type: "agent_start" });
+  assistant({ content: [{ type: "text", text: `ENVKEY=${process.env.NANOGPT_API_KEY ?? ""}` }], stopReason: "stop" });
+  emit({ type: "agent_end" });
 } else if (model.includes("nonceok")) {
   const prompt = await readStdin();
   const nonce = (/WORK COMPLETE ([0-9a-f]{16})/.exec(prompt) ?? [])[1] ?? "";

@@ -40,16 +40,33 @@ models, and NanoGPT models are strictly executors of mechanical, spec-driven wor
 The one apparent exception is the sentinel nonce, which looks semantic but isn't — a missing nonce
 means *the transport died*, not *the answer was wrong*.
 
-## Quickstart
+## Installation
 
 Requires Node ≥ 22.18 (native TypeScript via `--experimental-strip-types`).
 
 ```bash
-npm i -g @earendil-works/pi-coding-agent@0.80.10   # pi must be on PATH
-export NANOGPT_API_KEY=...                         # Pykrete does NOT read .env
-cp pykrete.example.toml pykrete.toml               # config is required
-node --experimental-strip-types bin/pykrete.ts "Write hello.txt containing PONG."
+git clone https://github.com/mark-dingwall/pykrete.git
+cd pykrete
+npm i
+npm link       # puts `pykrete` on PATH
 ```
+
+Or, without installing: `npx github:mark-dingwall/pykrete "<prompt>"` — re-fetches on every run unless
+pinned to a tag, and still needs a `pykrete.toml` and a key in the directory you run it from (see
+Quickstart below); npx does not put `pykrete.example.toml` or `.env.example` in your cwd, so fetch
+those from the repo yourself first.
+
+## Quickstart
+
+```bash
+npm i -g @earendil-works/pi-coding-agent@0.80.10   # pi must be on PATH
+cp pykrete.example.toml pykrete.toml               # config is required
+cp .env.example .env                               # fill in NANOGPT_API_KEY, or export it directly
+pykrete "Write hello.txt containing PONG."
+```
+
+A non-empty shell env still takes precedence over `.env` if both are set; an empty shell export is
+treated as absent, so it won't silently shadow a valid `.env` value.
 
 The prompt may be a positional argument, `-` to read stdin, or piped stdin. It always reaches pi via
 stdin, never argv — a large prompt on argv would exceed `MAX_ARG_STRLEN` and `E2BIG` at spawn.
@@ -71,7 +88,7 @@ The contract is frozen. `{0, 3}` are success, `{1, 2, 4}` are failure — a call
 | 0 | Success on the intended lead model |
 | 3 | Success, but on a substituted model after failover (a warning goes to stderr) |
 | 1 | Run error — fatal, transient, or died after producing output |
-| 2 | Usage error — bad config, unknown family, missing prompt |
+| 2 | Usage error — bad config, unknown family, missing prompt, unloadable `.env`, or missing API key |
 | 4 | Every candidate was unavailable |
 
 Note that `pi --mode json` exits 0 even on a failed run, so Pykrete classifies on the terminal
@@ -81,13 +98,14 @@ message's `stopReason`, never on pi's exit code.
 
 | Variable | Purpose |
 |----------|---------|
-| `NANOGPT_API_KEY` | Required. Must be exported; nothing loads `.env` for you. |
+| `NANOGPT_API_KEY` | Required. From the shell environment or a `.env` file in the working directory (a non-empty shell value wins if both are set). |
 | `PYKRETE_PI_BIN` | Override the `pi` binary (default: `pi` on `PATH`). |
 | `PYKRETE_HEARTBEAT_SECONDS` | Emit a periodic JSON progress line to stderr (`{"pykrete":"heartbeat",...}`). |
 | `PYKRETE_MODELS_URL` | Test seam for the catalog endpoint. Unset = production. |
+| `PYKRETE_SKIP_KEY_PREFLIGHT` | Test seam to bypass the `NANOGPT_API_KEY` preflight. Unset = production. |
 
-An unset API key fails confusingly rather than cleanly: the catalog reorder is skipped with a
-warning, then pi fails its auth preflight and exits with no terminal JSON event at all.
+A missing API key now fails cleanly: Pykrete checks for it (after attempting to load `.env`) before
+doing anything else, and exits 2 with a clear message if it's absent.
 
 ## Tests
 

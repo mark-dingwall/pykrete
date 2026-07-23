@@ -41,6 +41,31 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<number> {
+  // An empty shell export counts as "existing" to loadEnvFile and would silently block a valid
+  // .env value below, then fail with a misleading "not set" message. Treat empty as absent. Must
+  // precede loadEnvFile(): it treats an already-present (even empty) shell value as set and won't
+  // overwrite it from .env.
+  if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
+  const preEnvKeys = new Set(Object.keys(process.env));
+  try {
+    process.loadEnvFile();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(`pykrete: failed to load .env: ${(err as Error).message}`);
+      return 2;
+    }
+    // no .env in cwd; NANOGPT_API_KEY must already be exported
+  }
+  // .env may only supply NANOGPT_API_KEY; strip any other var it introduced so a .env
+  // cannot widen the trust surface (e.g. PYKRETE_PI_BIN) or disable PYKRETE_SKIP_KEY_PREFLIGHT.
+  for (const key of Object.keys(process.env)) {
+    if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
+  }
+  if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
+    console.error("pykrete: NANOGPT_API_KEY is not set (checked the environment and .env)");
+    return 2;
+  }
+
   let resolved;
   try {
     resolved = await run(process.argv.slice(2));
