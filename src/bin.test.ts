@@ -2,11 +2,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn, type SpawnSyncReturns } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+
+// A fresh, TTL-valid catalog cache keyed to `apiKey` so loadCatalog's real network fetch
+// (hardcoded to nano-gpt.com, no test seam) is never reached from these .env tests.
+function seedCatalogCache(apiKey: string): string {
+  const cacheRoot = mkdtempSync(join(tmpdir(), "pykrete-cache-"));
+  const cacheDir = join(cacheRoot, "pykrete");
+  mkdirSync(cacheDir, { recursive: true });
+  const hash = createHash("sha256").update(apiKey).digest("hex");
+  writeFileSync(join(cacheDir, `catalog-${hash}.json`), JSON.stringify(["dumpenv"]));
+  return cacheRoot;
+}
 
 const BIN = fileURLToPath(new URL("../bin/pykrete.ts", import.meta.url));
 const FAKE = fileURLToPath(new URL("./test-fixtures/fake-pi.mjs", import.meta.url));
@@ -158,6 +170,61 @@ test("no NANOGPT_API_KEY, no .env in cwd: exit 2", () => {
     ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
     { encoding: "utf-8", env: rest, cwd: dirname(configPath) },
   );
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /NANOGPT_API_KEY/);
+});
+
+test(".env in cwd supplies NANOGPT_API_KEY and it reaches the launched pi", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const key = "envkey-abc123";
+  const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  writeFileSync(join(envDir, ".env"), `NANOGPT_API_KEY=${key}\n`);
+  const cacheRoot = seedCatalogCache(key);
+  const configPath = writeConfig(["dumpenv"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    { encoding: "utf-8", cwd: envDir, env: { ...rest, PYKRETE_PI_BIN: FAKE, XDG_CACHE_HOME: cacheRoot } },
+  );
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
+});
+
+test("shell env NANOGPT_API_KEY wins over a .env value in cwd", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const shellKey = "envkey-fromshell";
+  const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  writeFileSync(join(envDir, ".env"), "NANOGPT_API_KEY=envkey-fromdotenv\n");
+  const cacheRoot = seedCatalogCache(shellKey);
+  const configPath = writeConfig(["dumpenv"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    {
+      encoding: "utf-8",
+      cwd: envDir,
+      env: { ...rest, NANOGPT_API_KEY: shellKey, PYKRETE_PI_BIN: FAKE, XDG_CACHE_HOME: cacheRoot },
+    },
+  );
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${shellKey}\\b`));
+});
+
+test(".env cannot set PYKRETE_SKIP_KEY_PREFLIGHT or PYKRETE_PI_BIN", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, PYKRETE_PI_BIN, ...rest } = process.env;
+  const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  writeFileSync(
+    join(envDir, ".env"),
+    `PYKRETE_SKIP_KEY_PREFLIGHT=1\nPYKRETE_PI_BIN=${FAKE}\n`,
+  );
+  const configPath = writeConfig(["good-ok"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    { encoding: "utf-8", cwd: envDir, env: rest },
+  );
+  // Preflight must still fire (no real NANOGPT_API_KEY, and the .env's skip flag must not apply),
+  // proving PYKRETE_PI_BIN from .env was also never adopted (nothing here would resolve `pi` otherwise).
   assert.equal(r.status, 2);
   assert.match(r.stderr, /NANOGPT_API_KEY/);
 });

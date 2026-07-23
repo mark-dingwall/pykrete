@@ -41,10 +41,20 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<number> {
+  const preEnvKeys = new Set(Object.keys(process.env));
   try {
     process.loadEnvFile();
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(`pykrete: failed to load .env: ${(err as Error).message}`);
+      return 2;
+    }
     // no .env in cwd; NANOGPT_API_KEY must already be exported
+  }
+  // .env may only supply NANOGPT_API_KEY; strip any other var it introduced so a .env
+  // cannot widen the trust surface (e.g. PYKRETE_PI_BIN) or disable PYKRETE_SKIP_KEY_PREFLIGHT.
+  for (const key of Object.keys(process.env)) {
+    if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
   }
   if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
     console.error("pykrete: NANOGPT_API_KEY is not set (checked the environment and .env)");
