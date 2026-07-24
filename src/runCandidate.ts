@@ -8,6 +8,10 @@ export interface CandidateContext {
   prompt: string;
   nonceEnabled: boolean;
   resumeAttempts: number;
+  backoffBaseMs?: number;
+  backoffFactor?: number;
+  backoffCapMs?: number;
+  maxOutageRetries?: number;
 }
 
 export interface RunCandidateDeps {
@@ -44,20 +48,24 @@ type GateResult =
 
 export async function runCandidate(ctx: CandidateContext, deps: RunCandidateDeps): Promise<CandidateResult> {
   let pausedMs = 0;
+  const backoffBaseMs = ctx.backoffBaseMs ?? BACKOFF_BASE_MS;
+  const backoffFactor = ctx.backoffFactor ?? BACKOFF_FACTOR;
+  const backoffCapMs = ctx.backoffCapMs ?? BACKOFF_CAP_MS;
+  const maxOutageRetries = ctx.maxOutageRetries ?? MAX_OUTAGE_RETRIES;
 
   const gate = async (): Promise<GateResult> => {
     const first = await deps.probe();
     if (first === "up") return { kind: "proceed" };
     // down | throttled -> exponential backoff-wait (D6: a 429 is reachable but still warrants backoff)
     const label = first === "throttled" ? "rate-limited" : "unreachable";
-    let delay = BACKOFF_BASE_MS;
-    while (delay <= BACKOFF_CAP_MS) {
+    let delay = backoffBaseMs;
+    while (delay <= backoffCapMs) {
       deps.warn(`pykrete: NanoGPT ${label}; waiting ${Math.round(delay / 1000)}s before re-probe`);
       await deps.sleep(delay);
       pausedMs += delay;
       const p = await deps.probe();
       if (p === "up") return { kind: "recovered" };
-      delay *= BACKOFF_FACTOR;
+      delay *= backoffFactor;
     }
     return { kind: "giveup", message: `NanoGPT ${label}; gave up after backoff` };
   };
@@ -100,7 +108,7 @@ export async function runCandidate(ctx: CandidateContext, deps: RunCandidateDeps
     // already produced we MUST resume to preserve it; if we cannot (nonce disabled, or pi wrote no
     // resumable session), that is the unified partial terminal (FIX B/D) — never a blind fresh re-run.
     const retrySameCandidateAfterOutage = async (): Promise<CandidateResult | "looped"> => {
-      if (++outageRetries > MAX_OUTAGE_RETRIES) {
+      if (++outageRetries > maxOutageRetries) {
         return { kind: "transient", message: "NanoGPT connectivity too unstable; gave up", pausedMs };
       }
       if (!sawOutput) {

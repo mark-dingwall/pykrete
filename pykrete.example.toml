@@ -37,7 +37,7 @@ glm = "zai-org/glm-5.2:thinking"
 kimi = "moonshotai/kimi-k2.7-code"
 deepseek = "deepseek/deepseek-v4-pro-cheaper:thinking"
 
-# Transport liveness. Defaults apply if this table is omitted entirely.
+# Transport liveness and watchdog timeouts. Defaults apply if this table is omitted entirely.
 [liveness]
 # Inject a sentinel nonce and resume if it is missing from the terminal message.
 nonce_enabled = true
@@ -47,3 +47,30 @@ nonce_enabled = true
 idle_timeout_seconds = 330
 # Resume attempts per candidate after a missing nonce or an idle trip.
 resume_attempts = 1
+# How long to wait for pi's first stdout line before treating startup as stalled.
+startup_timeout_seconds = 180
+# Hard cap on a single attempt (one candidate, one launch), from spawn to close.
+overall_timeout_seconds = 1800
+# Hard cap on the whole failover run, across every candidate. Time spent paused waiting out a
+# NanoGPT outage does not count against this. A family with N candidates can legitimately need up
+# to N x overall_timeout_seconds, so raise this if you also raise overall_timeout_seconds or add
+# candidates to a family.
+deadline_seconds = 3600
+# Grace period between SIGTERM and the SIGKILL escalation when a watchdog fires.
+kill_grace_seconds = 5
+# Timeout for the reachability probe (GET /models) used to distinguish a NanoGPT outage from a
+# genuine model failure.
+probe_timeout_seconds = 4
+
+# Retry behaviour. Defaults apply if this table is omitted entirely.
+[retry]
+# Pi's own same-model transient retry, passed through to the generated settings.json.
+max_retries = 3
+base_delay_ms = 2000
+max_retry_delay_ms = 60000
+# Pykrete's own reachability-probe backoff ladder (distinct from the retry above: this backs off
+# re-probing NanoGPT during an outage, not re-sending a model request).
+outage_backoff_base_ms = 1000
+outage_backoff_factor = 2
+outage_backoff_cap_ms = 1024000
+max_outage_retries = 10

@@ -135,12 +135,42 @@ const baseCfg = { default_family: "glm", families: { glm: ["a"] } };
 
 test("liveness defaults when [liveness] omitted", () => {
   const c = parseConfig(baseCfg);
-  assert.deepEqual(c.liveness, { nonceEnabled: true, idleTimeoutSeconds: 330, resumeAttempts: 1 });
+  assert.deepEqual(c.liveness, {
+    nonceEnabled: true,
+    idleTimeoutSeconds: 330,
+    resumeAttempts: 1,
+    startupTimeoutSeconds: 180,
+    overallTimeoutSeconds: 1800,
+    deadlineSeconds: 3600,
+    killGraceSeconds: 5,
+    probeTimeoutSeconds: 4,
+  });
 });
 
 test("liveness values are read and typed", () => {
-  const c = parseConfig({ ...baseCfg, liveness: { nonce_enabled: false, idle_timeout_seconds: 90, resume_attempts: 2 } });
-  assert.deepEqual(c.liveness, { nonceEnabled: false, idleTimeoutSeconds: 90, resumeAttempts: 2 });
+  const c = parseConfig({
+    ...baseCfg,
+    liveness: {
+      nonce_enabled: false,
+      idle_timeout_seconds: 90,
+      resume_attempts: 2,
+      startup_timeout_seconds: 60,
+      overall_timeout_seconds: 900,
+      deadline_seconds: 1800,
+      kill_grace_seconds: 10,
+      probe_timeout_seconds: 8,
+    },
+  });
+  assert.deepEqual(c.liveness, {
+    nonceEnabled: false,
+    idleTimeoutSeconds: 90,
+    resumeAttempts: 2,
+    startupTimeoutSeconds: 60,
+    overallTimeoutSeconds: 900,
+    deadlineSeconds: 1800,
+    killGraceSeconds: 10,
+    probeTimeoutSeconds: 8,
+  });
 });
 
 test("liveness.idle_timeout_seconds must be a positive integer", () => {
@@ -154,4 +184,71 @@ test("liveness.resume_attempts may be 0 but not negative", () => {
 
 test("liveness.nonce_enabled must be a boolean", () => {
   assert.throws(() => parseConfig({ ...baseCfg, liveness: { nonce_enabled: "yes" } }), ConfigError);
+});
+
+test("liveness.startup_timeout_seconds, overall_timeout_seconds, deadline_seconds, kill_grace_seconds, probe_timeout_seconds must be positive integers", () => {
+  for (const key of [
+    "startup_timeout_seconds",
+    "overall_timeout_seconds",
+    "deadline_seconds",
+    "kill_grace_seconds",
+    "probe_timeout_seconds",
+  ]) {
+    assert.throws(() => parseConfig({ ...baseCfg, liveness: { [key]: 0 } }), ConfigError, `${key} = 0 should be rejected`);
+    assert.throws(() => parseConfig({ ...baseCfg, liveness: { [key]: 1.5 } }), ConfigError, `${key} = 1.5 should be rejected`);
+  }
+});
+
+test("retry defaults when [retry] omitted", () => {
+  const c = parseConfig(baseCfg);
+  assert.deepEqual(c.retry, {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxRetryDelayMs: 60000,
+    outageBackoffBaseMs: 1000,
+    outageBackoffFactor: 2,
+    outageBackoffCapMs: 1_024_000,
+    maxOutageRetries: 10,
+  });
+});
+
+test("retry values are read and typed", () => {
+  const c = parseConfig({
+    ...baseCfg,
+    retry: {
+      max_retries: 5,
+      base_delay_ms: 500,
+      max_retry_delay_ms: 30000,
+      outage_backoff_base_ms: 2000,
+      outage_backoff_factor: 3,
+      outage_backoff_cap_ms: 512000,
+      max_outage_retries: 4,
+    },
+  });
+  assert.deepEqual(c.retry, {
+    maxRetries: 5,
+    baseDelayMs: 500,
+    maxRetryDelayMs: 30000,
+    outageBackoffBaseMs: 2000,
+    outageBackoffFactor: 3,
+    outageBackoffCapMs: 512000,
+    maxOutageRetries: 4,
+  });
+});
+
+test("retry.max_retries and retry.max_outage_retries may be 0 but not negative", () => {
+  assert.equal(parseConfig({ ...baseCfg, retry: { max_retries: 0 } }).retry.maxRetries, 0);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { max_retries: -1 } }), ConfigError);
+  assert.equal(parseConfig({ ...baseCfg, retry: { max_outage_retries: 0 } }).retry.maxOutageRetries, 0);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { max_outage_retries: -1 } }), ConfigError);
+});
+
+test("retry.outage_backoff_factor must be greater than 1", () => {
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 0.5 } }), ConfigError);
+  assert.equal(parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.5 } }).retry.outageBackoffFactor, 1.5);
+});
+
+test("[retry] must be a table", () => {
+  assert.throws(() => parseConfig({ ...baseCfg, retry: "nope" }), ConfigError);
 });

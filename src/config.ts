@@ -9,6 +9,21 @@ export interface LivenessConfig {
   nonceEnabled: boolean;
   idleTimeoutSeconds: number;
   resumeAttempts: number;
+  startupTimeoutSeconds: number;
+  overallTimeoutSeconds: number;
+  deadlineSeconds: number;
+  killGraceSeconds: number;
+  probeTimeoutSeconds: number;
+}
+
+export interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxRetryDelayMs: number;
+  outageBackoffBaseMs: number;
+  outageBackoffFactor: number;
+  outageBackoffCapMs: number;
+  maxOutageRetries: number;
 }
 
 export interface Config {
@@ -17,6 +32,7 @@ export interface Config {
   families: Record<string, string[]>;
   defaults: Record<string, Record<string, string>>;
   liveness: LivenessConfig;
+  retry: RetryConfig;
 }
 
 export class ConfigError extends Error {}
@@ -26,9 +42,31 @@ const DEFAULT_TTL = 3600;
 // idleTimeoutSeconds default 330 sits deliberately OUTSIDE pi's 300s HTTP idle window (see Global
 // Constraints) so pi's own abort/self-retry fires before Pykrete's watchdog. resumeAttempts default 1;
 // note the deadline caveat below (a single candidate's resume loop can consume up to
-// (resumeAttempts+1) x OVERALL_TIMEOUT_MS of non-paused wall-time, since the overall deadline is
+// (resumeAttempts+1) x overallTimeoutSeconds of non-paused wall-time, since the overall deadline is
 // enforced BETWEEN candidates, not within one — see Task 8 design note).
-const DEFAULT_LIVENESS: LivenessConfig = { nonceEnabled: true, idleTimeoutSeconds: 330, resumeAttempts: 1 };
+const DEFAULT_LIVENESS: LivenessConfig = {
+  nonceEnabled: true,
+  idleTimeoutSeconds: 330,
+  resumeAttempts: 1,
+  startupTimeoutSeconds: 180,
+  overallTimeoutSeconds: 1800,
+  deadlineSeconds: 3600,
+  killGraceSeconds: 5,
+  probeTimeoutSeconds: 4,
+};
+
+// maxRetries/baseDelayMs/maxRetryDelayMs are pi's own same-model transient retry, passed through to
+// the generated settings.json. outageBackoff*/maxOutageRetries are Pykrete's own reachability-probe
+// backoff ladder in runCandidate.ts (distinct mechanism: retrying a probe, not a model request).
+const DEFAULT_RETRY: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 2000,
+  maxRetryDelayMs: 60000,
+  outageBackoffBaseMs: 1000,
+  outageBackoffFactor: 2,
+  outageBackoffCapMs: 1_024_000,
+  maxOutageRetries: 10,
+};
 
 export function parseConfig(raw: unknown): Config {
   if (typeof raw !== "object" || raw === null) {
@@ -128,9 +166,104 @@ export function parseConfig(raw: unknown): Config {
       }
       liveness.resumeAttempts = v;
     }
+    if (l.startup_timeout_seconds !== undefined) {
+      const v = l.startup_timeout_seconds;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[liveness].startup_timeout_seconds must be a positive integer");
+      }
+      liveness.startupTimeoutSeconds = v;
+    }
+    if (l.overall_timeout_seconds !== undefined) {
+      const v = l.overall_timeout_seconds;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[liveness].overall_timeout_seconds must be a positive integer");
+      }
+      liveness.overallTimeoutSeconds = v;
+    }
+    if (l.deadline_seconds !== undefined) {
+      const v = l.deadline_seconds;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[liveness].deadline_seconds must be a positive integer");
+      }
+      liveness.deadlineSeconds = v;
+    }
+    if (l.kill_grace_seconds !== undefined) {
+      const v = l.kill_grace_seconds;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[liveness].kill_grace_seconds must be a positive integer");
+      }
+      liveness.killGraceSeconds = v;
+    }
+    if (l.probe_timeout_seconds !== undefined) {
+      const v = l.probe_timeout_seconds;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[liveness].probe_timeout_seconds must be a positive integer");
+      }
+      liveness.probeTimeoutSeconds = v;
+    }
   }
 
-  return { defaultFamily, catalog: { ttlSeconds }, families, defaults, liveness };
+  // retry — pi's native retry passthrough plus Pykrete's own outage-backoff ladder. All optional
+  // with defaults matching the prior hardcoded constants.
+  const retry: RetryConfig = { ...DEFAULT_RETRY };
+  const retryRaw = root.retry;
+  if (retryRaw !== undefined) {
+    if (typeof retryRaw !== "object" || retryRaw === null) {
+      throw new ConfigError("[retry] must be a table");
+    }
+    const r = retryRaw as Record<string, unknown>;
+    if (r.max_retries !== undefined) {
+      const v = r.max_retries;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new ConfigError("[retry].max_retries must be a non-negative integer");
+      }
+      retry.maxRetries = v;
+    }
+    if (r.base_delay_ms !== undefined) {
+      const v = r.base_delay_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].base_delay_ms must be a positive integer");
+      }
+      retry.baseDelayMs = v;
+    }
+    if (r.max_retry_delay_ms !== undefined) {
+      const v = r.max_retry_delay_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].max_retry_delay_ms must be a positive integer");
+      }
+      retry.maxRetryDelayMs = v;
+    }
+    if (r.outage_backoff_base_ms !== undefined) {
+      const v = r.outage_backoff_base_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].outage_backoff_base_ms must be a positive integer");
+      }
+      retry.outageBackoffBaseMs = v;
+    }
+    if (r.outage_backoff_factor !== undefined) {
+      const v = r.outage_backoff_factor;
+      if (typeof v !== "number" || !Number.isFinite(v) || v <= 1) {
+        throw new ConfigError("[retry].outage_backoff_factor must be a number greater than 1");
+      }
+      retry.outageBackoffFactor = v;
+    }
+    if (r.outage_backoff_cap_ms !== undefined) {
+      const v = r.outage_backoff_cap_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].outage_backoff_cap_ms must be a positive integer");
+      }
+      retry.outageBackoffCapMs = v;
+    }
+    if (r.max_outage_retries !== undefined) {
+      const v = r.max_outage_retries;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new ConfigError("[retry].max_outage_retries must be a non-negative integer");
+      }
+      retry.maxOutageRetries = v;
+    }
+  }
+
+  return { defaultFamily, catalog: { ttlSeconds }, families, defaults, liveness, retry };
 }
 
 export function loadConfig(path: string): Config {

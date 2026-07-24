@@ -33,6 +33,15 @@ test("buildSettingsJson pins pi native same-model transient retry on", () => {
   assert.equal(json.retry.provider.maxRetryDelayMs, 60000);
 });
 
+test("buildSettingsJson honours retry overrides", () => {
+  const json = buildSettingsJson({ maxRetries: 5, baseDelayMs: 500, maxRetryDelayMs: 30000 }) as {
+    retry: { maxRetries: number; baseDelayMs: number; provider: { maxRetryDelayMs: number } };
+  };
+  assert.equal(json.retry.maxRetries, 5);
+  assert.equal(json.retry.baseDelayMs, 500);
+  assert.equal(json.retry.provider.maxRetryDelayMs, 30000);
+});
+
 test("createAgentDir writes models.json + settings.json and cleanup removes the dir", () => {
   const models = buildModelsJson(["a/b"]);
   const settings = buildSettingsJson();

@@ -368,6 +368,18 @@ test("a flapping network (down/up forever) terminates at MAX_OUTAGE_RETRIES with
   assert.equal(r.kind, "transient"); // gave up after MAX_OUTAGE_RETRIES
 });
 
+test("ctx backoff overrides replace the default ladder and cap", async () => {
+  const slept: number[] = [];
+  const launch: RunCandidateDeps["launch"] = () =>
+    Promise.resolve(outcome({ stopReason: "stop", text: "not done", sawAssistantOutput: true }));
+  const r = await runCandidate(
+    { ...ctx, backoffBaseMs: 10, backoffFactor: 3, backoffCapMs: 90, maxOutageRetries: 1 },
+    baseDeps({ launch, probe: () => Promise.resolve("down"), sleep: (ms) => { slept.push(ms); return Promise.resolve(); } }),
+  );
+  assert.equal(r.kind, "transient");
+  assert.deepEqual(slept, [10, 30, 90]); // custom ladder, not the default 1000/2/1024000
+});
+
 test("idledOut AND overallTimedOut both set -> idle route (reachability gate) wins (D5)", async () => {
   let probed = false;
   const launch: RunCandidateDeps["launch"] = () =>
