@@ -273,3 +273,37 @@ test("retry.outage_backoff_cap_ms must be >= outage_backoff_base_ms", () => {
   const c = parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 1000, outage_backoff_cap_ms: 1000 } });
   assert.equal(c.retry.outageBackoffCapMs, 1000);
 });
+
+test("liveness timeout fields that feed setTimeout must not exceed Node's max delay (2147483647ms)", () => {
+  const fields: [string, keyof Config["liveness"]][] = [
+    ["startup_timeout_seconds", "startupTimeoutSeconds"],
+    ["overall_timeout_seconds", "overallTimeoutSeconds"],
+    ["kill_grace_seconds", "killGraceSeconds"],
+    ["probe_timeout_seconds", "probeTimeoutSeconds"],
+  ];
+  for (const [snake, camel] of fields) {
+    assert.throws(
+      () => parseConfig({ ...baseCfg, liveness: { [snake]: 2_147_484 } }),
+      ConfigError,
+      `${snake} = 2_147_484 (over the max) should be rejected`,
+    );
+    const c = parseConfig({ ...baseCfg, liveness: { [snake]: 2_147_483 } });
+    assert.equal(c.liveness[camel], 2_147_483, `${snake} = 2_147_483 (the max) should be accepted`);
+  }
+});
+
+test("retry.outage_backoff_base_ms and outage_backoff_cap_ms must not exceed Node's max setTimeout delay", () => {
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 2_147_483_648 } }),
+    ConfigError,
+  );
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_cap_ms: 2_147_483_648 } }),
+    ConfigError,
+  );
+  const c = parseConfig({
+    ...baseCfg,
+    retry: { outage_backoff_base_ms: 2_147_483_647, outage_backoff_cap_ms: 2_147_483_647 },
+  });
+  assert.equal(c.retry.outageBackoffCapMs, 2_147_483_647);
+});

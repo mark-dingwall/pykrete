@@ -68,6 +68,13 @@ const DEFAULT_RETRY: RetryConfig = {
   maxOutageRetries: 10,
 };
 
+// Every field checked against these eventually reaches node:timers `setTimeout`, whose delay is a
+// 32-bit signed int internally; Node clamps any value outside [1, 2147483647] down to ~1ms (fires
+// almost immediately) instead of erroring. An operator setting a huge value to mean "effectively
+// unlimited" would otherwise get the opposite. Reject anything that would silently invert intent.
+const MAX_SETTIMEOUT_MS = 2_147_483_647;
+const MAX_SETTIMEOUT_SECONDS = Math.floor(MAX_SETTIMEOUT_MS / 1000); // 2_147_483
+
 export function parseConfig(raw: unknown): Config {
   if (typeof raw !== "object" || raw === null) {
     throw new ConfigError("config root must be a table");
@@ -168,15 +175,19 @@ export function parseConfig(raw: unknown): Config {
     }
     if (l.startup_timeout_seconds !== undefined) {
       const v = l.startup_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].startup_timeout_seconds must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
+        throw new ConfigError(
+          `[liveness].startup_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
+        );
       }
       liveness.startupTimeoutSeconds = v;
     }
     if (l.overall_timeout_seconds !== undefined) {
       const v = l.overall_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].overall_timeout_seconds must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
+        throw new ConfigError(
+          `[liveness].overall_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
+        );
       }
       liveness.overallTimeoutSeconds = v;
     }
@@ -189,15 +200,19 @@ export function parseConfig(raw: unknown): Config {
     }
     if (l.kill_grace_seconds !== undefined) {
       const v = l.kill_grace_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].kill_grace_seconds must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
+        throw new ConfigError(
+          `[liveness].kill_grace_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
+        );
       }
       liveness.killGraceSeconds = v;
     }
     if (l.probe_timeout_seconds !== undefined) {
       const v = l.probe_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].probe_timeout_seconds must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
+        throw new ConfigError(
+          `[liveness].probe_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
+        );
       }
       liveness.probeTimeoutSeconds = v;
     }
@@ -235,8 +250,10 @@ export function parseConfig(raw: unknown): Config {
     }
     if (r.outage_backoff_base_ms !== undefined) {
       const v = r.outage_backoff_base_ms;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[retry].outage_backoff_base_ms must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_MS) {
+        throw new ConfigError(
+          `[retry].outage_backoff_base_ms must be a positive integer no greater than ${MAX_SETTIMEOUT_MS} (Node's setTimeout max delay)`,
+        );
       }
       retry.outageBackoffBaseMs = v;
     }
@@ -249,8 +266,10 @@ export function parseConfig(raw: unknown): Config {
     }
     if (r.outage_backoff_cap_ms !== undefined) {
       const v = r.outage_backoff_cap_ms;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[retry].outage_backoff_cap_ms must be a positive integer");
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_MS) {
+        throw new ConfigError(
+          `[retry].outage_backoff_cap_ms must be a positive integer no greater than ${MAX_SETTIMEOUT_MS} (Node's setTimeout max delay)`,
+        );
       }
       retry.outageBackoffCapMs = v;
     }
