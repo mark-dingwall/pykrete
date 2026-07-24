@@ -368,6 +368,26 @@ test("a flapping network (down/up forever) terminates at MAX_OUTAGE_RETRIES with
   assert.equal(r.kind, "transient"); // gave up after MAX_OUTAGE_RETRIES
 });
 
+test("ctx.maxOutageRetries override bounds the outage-retry loop itself, not just the backoff ladder", async () => {
+  // Unlike "ctx backoff overrides replace the default ladder and cap" (which uses an always-"down"
+  // probe, so gate()'s own ladder exhausts first), this drives probe recovery every cycle so
+  // retrySameCandidateAfterOutage's own `++outageRetries > maxOutageRetries` check is what
+  // terminates the loop. If the override were silently dropped (falling back to the default
+  // MAX_OUTAGE_RETRIES = 10), this would run 11 launches instead of 3 and the assertion would fail.
+  let launches = 0;
+  const launch: RunCandidateDeps["launch"] = () => {
+    launches += 1;
+    return Promise.resolve(outcome({}, { idledOut: true })); // pre-output idle, no session -> always retries fresh
+  };
+  const probe = (() => { let i = 0; return () => Promise.resolve<Reachability>(i++ % 2 === 0 ? "down" : "up"); })();
+  const r = await runCandidate(
+    { ...ctx, maxOutageRetries: 2 },
+    baseDeps({ launch, probe, sleep: () => Promise.resolve() }),
+  );
+  assert.equal(r.kind, "transient");
+  assert.equal(launches, 3); // initial launch + 2 retries, then the 3rd recovery exceeds maxOutageRetries=2
+});
+
 test("ctx backoff overrides replace the default ladder and cap", async () => {
   const slept: number[] = [];
   const launch: RunCandidateDeps["launch"] = () =>
