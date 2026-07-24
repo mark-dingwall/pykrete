@@ -252,3 +252,24 @@ test("retry.outage_backoff_factor must be greater than 1", () => {
 test("[retry] must be a table", () => {
   assert.throws(() => parseConfig({ ...baseCfg, retry: "nope" }), ConfigError);
 });
+
+test("retry.outage_backoff_cap_ms must be >= outage_backoff_base_ms", () => {
+  // Both explicit, cap below base.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 5000, outage_backoff_cap_ms: 1000 } }),
+    ConfigError,
+  );
+  // Only base set, above the default cap (1_024_000) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 2_000_000 } }),
+    ConfigError,
+  );
+  // Only cap set, below the default base (1000) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_cap_ms: 500 } }),
+    ConfigError,
+  );
+  // Equal is the boundary case and must be accepted (loop runs exactly once).
+  const c = parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 1000, outage_backoff_cap_ms: 1000 } });
+  assert.equal(c.retry.outageBackoffCapMs, 1000);
+});

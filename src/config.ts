@@ -263,6 +263,15 @@ export function parseConfig(raw: unknown): Config {
     }
   }
 
+  // Cross-field: cap must be able to hold at least one ladder step, or gate() in runCandidate.ts
+  // gives up on the first outage with zero backoff — silently disabling the whole mechanism.
+  // Checked against the fully-resolved values so a lone override of either field is still caught.
+  if (retry.outageBackoffCapMs < retry.outageBackoffBaseMs) {
+    throw new ConfigError(
+      "[retry].outage_backoff_cap_ms must be >= outage_backoff_base_ms (otherwise the backoff ladder never runs and a single outage blip gives up immediately)",
+    );
+  }
+
   return { defaultFamily, catalog: { ttlSeconds }, families, defaults, liveness, retry };
 }
 
