@@ -295,7 +295,7 @@ test("liveness timeout fields that feed setTimeout must not exceed Node's max de
 test("retry.outage_backoff_base_ms and outage_backoff_cap_ms must not exceed Node's max setTimeout delay", () => {
   assert.throws(
     () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 2_147_483_648 } }),
-    ConfigError,
+    /outage_backoff_base_ms must be a positive integer no greater than 2147483647/,
   );
   assert.throws(
     () => parseConfig({ ...baseCfg, retry: { outage_backoff_cap_ms: 2_147_483_648 } }),
