@@ -52,9 +52,11 @@ startup_timeout_seconds = 180
 # Hard cap on a single attempt (one candidate, one launch), from spawn to close.
 overall_timeout_seconds = 1800
 # Hard cap on the whole failover run, across every candidate. Time spent paused waiting out a
-# NanoGPT outage does not count against this. A family with N candidates can legitimately need up
-# to N x overall_timeout_seconds, so raise this if you also raise overall_timeout_seconds or add
-# candidates to a family.
+# NanoGPT outage does not count against this. The deadline is checked BETWEEN candidates, not
+# within one, so a single candidate's resume loop can consume up to (resume_attempts+1) x
+# overall_timeout_seconds. A family with N candidates can legitimately need up to
+# N x (resume_attempts+1) x overall_timeout_seconds — raise this if you raise overall_timeout_seconds,
+# resume_attempts, or add candidates to a family.
 deadline_seconds = 3600
 # Grace period between SIGTERM and the SIGKILL escalation when a watchdog fires.
 kill_grace_seconds = 5
