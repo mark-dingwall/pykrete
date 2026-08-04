@@ -1,5 +1,6 @@
 // src/runCandidate.ts
 import { classify, type Verdict } from "./classify.ts";
+import { DEFAULT_RETRY } from "./config.ts";
 import type { AttemptOutcome } from "./launch.ts";
 import { mintNonce, buildSuffix, buildResumePrompt, noncePresent, stripSentinel } from "./nonce.ts";
 import type { Reachability } from "./reachability.ts";
@@ -30,10 +31,12 @@ export type CandidateResult = (
   | { kind: "transient"; message: string }
 ) & { pausedMs: number };
 
-const BACKOFF_BASE_MS = 1_000;
-const BACKOFF_FACTOR = 2;
-const BACKOFF_CAP_MS = 1_024_000; // 2^10 s
-const MAX_OUTAGE_RETRIES = 10; // backstop against a flapping network (recover->relaunch->re-outage forever)
+// Fallback defaults, used only when a caller constructs CandidateContext without going through
+// config.ts (e.g. tests). Sourced from DEFAULT_RETRY so they can't drift from the config defaults.
+const BACKOFF_BASE_MS = DEFAULT_RETRY.outageBackoffBaseMs;
+const BACKOFF_FACTOR = DEFAULT_RETRY.outageBackoffFactor;
+const BACKOFF_CAP_MS = DEFAULT_RETRY.outageBackoffCapMs;
+const MAX_OUTAGE_RETRIES = DEFAULT_RETRY.maxOutageRetries; // backstop against a flapping network (recover->relaunch->re-outage forever)
 
 // One gate handles ALL outage/throttle waiting. `proceed` = API was up on the first probe (no outage,
 // route per verdict). `recovered` = it was down/throttled, we backed off, it came back (retry the same

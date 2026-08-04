@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_RETRY } from "./config.ts";
 
 export interface NanogptProviderOptions {
   baseUrl?: string;
@@ -33,9 +34,9 @@ export function buildSettingsJson(opts: RetrySettingsOptions = {}): unknown {
   return {
     retry: {
       enabled: true,
-      maxRetries: opts.maxRetries ?? 3,
-      baseDelayMs: opts.baseDelayMs ?? 2000,
-      provider: { maxRetryDelayMs: opts.maxRetryDelayMs ?? 60000 },
+      maxRetries: opts.maxRetries ?? DEFAULT_RETRY.maxRetries,
+      baseDelayMs: opts.baseDelayMs ?? DEFAULT_RETRY.baseDelayMs,
+      provider: { maxRetryDelayMs: opts.maxRetryDelayMs ?? DEFAULT_RETRY.maxRetryDelayMs },
     },
   };
 }

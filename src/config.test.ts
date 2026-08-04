@@ -243,9 +243,12 @@ test("retry.max_retries and retry.max_outage_retries may be 0 but not negative",
   assert.throws(() => parseConfig({ ...baseCfg, retry: { max_outage_retries: -1 } }), ConfigError);
 });
 
-test("retry.outage_backoff_factor must be greater than 1", () => {
+test("retry.outage_backoff_factor must be at least 1.15", () => {
   assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1 } }), ConfigError);
   assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 0.5 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.001 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.1 } }), ConfigError);
+  assert.equal(parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.15 } }).retry.outageBackoffFactor, 1.15);
   assert.equal(parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.5 } }).retry.outageBackoffFactor, 1.5);
 });
 
@@ -274,9 +277,35 @@ test("retry.outage_backoff_cap_ms must be >= outage_backoff_base_ms", () => {
   assert.equal(c.retry.outageBackoffCapMs, 1000);
 });
 
+test("liveness.startup_timeout_seconds must be less than overall_timeout_seconds", () => {
+  // Both explicit, startup above overall.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 900, overall_timeout_seconds: 600 } }),
+    ConfigError,
+  );
+  // Only startup set, above the default overall (1800) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 2000 } }),
+    ConfigError,
+  );
+  // Only overall set, below the default startup (180) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { overall_timeout_seconds: 100 } }),
+    ConfigError,
+  );
+  // Equal is rejected too — startup would still never fire first.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 600, overall_timeout_seconds: 600 } }),
+    ConfigError,
+  );
+  const c = parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 599, overall_timeout_seconds: 600 } });
+  assert.equal(c.liveness.startupTimeoutSeconds, 599);
+});
+
 test("liveness timeout fields that feed setTimeout must not exceed Node's max delay (2147483647ms)", () => {
+  // overall_timeout_seconds, kill_grace_seconds, probe_timeout_seconds are independent of the
+  // startup/overall cross-check (or, for overall itself, satisfy it against the default startup=180).
   const fields: [string, keyof Config["liveness"]][] = [
-    ["startup_timeout_seconds", "startupTimeoutSeconds"],
     ["overall_timeout_seconds", "overallTimeoutSeconds"],
     ["kill_grace_seconds", "killGraceSeconds"],
     ["probe_timeout_seconds", "probeTimeoutSeconds"],
@@ -290,6 +319,20 @@ test("liveness timeout fields that feed setTimeout must not exceed Node's max de
     const c = parseConfig({ ...baseCfg, liveness: { [snake]: 2_147_483 } });
     assert.equal(c.liveness[camel], 2_147_483, `${snake} = 2_147_483 (the max) should be accepted`);
   }
+
+  // startup_timeout_seconds can't reach the exact ceiling on its own — overall_timeout_seconds shares
+  // the same ceiling and must stay strictly greater (see the cross-check test above). Pair it with
+  // overall at its own ceiling to check the per-field ceiling arithmetic near the top of its range.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 2_147_484, overall_timeout_seconds: 2_147_483 } }),
+    ConfigError,
+    "startup_timeout_seconds = 2_147_484 (over the max) should be rejected",
+  );
+  const startupNearMax = parseConfig({
+    ...baseCfg,
+    liveness: { startup_timeout_seconds: 2_147_482, overall_timeout_seconds: 2_147_483 },
+  });
+  assert.equal(startupNearMax.liveness.startupTimeoutSeconds, 2_147_482);
 });
 
 test("retry.outage_backoff_base_ms and outage_backoff_cap_ms must not exceed Node's max setTimeout delay", () => {
