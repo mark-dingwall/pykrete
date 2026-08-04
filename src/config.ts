@@ -75,6 +75,23 @@ const DEFAULT_RETRY: RetryConfig = {
 const MAX_SETTIMEOUT_MS = 2_147_483_647;
 const MAX_SETTIMEOUT_SECONDS = Math.floor(MAX_SETTIMEOUT_MS / 1000); // 2_147_483
 
+// Shared shape for the [liveness] integer fields below: all are either positive (min 1) or
+// non-negative (min 0), and some additionally cap at MAX_SETTIMEOUT_SECONDS because they flow into
+// setTimeout. Centralizing this after idle_timeout_seconds shipped without the ceiling its siblings
+// got — that drift is exactly what duplicated blocks make easy to miss.
+function parseLivenessBoundedInt(raw: unknown, key: string, opts: { min: 0 | 1; max?: number }): number {
+  const bound = opts.min === 0 ? "non-negative" : "positive";
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < opts.min || (opts.max !== undefined && raw > opts.max)) {
+    if (opts.max !== undefined) {
+      throw new ConfigError(
+        `[liveness].${key} must be a ${bound} integer no greater than ${opts.max} (Node's setTimeout max delay)`,
+      );
+    }
+    throw new ConfigError(`[liveness].${key} must be a ${bound} integer`);
+  }
+  return raw;
+}
+
 export function parseConfig(raw: unknown): Config {
   if (typeof raw !== "object" || raw === null) {
     throw new ConfigError("config root must be a table");
@@ -160,61 +177,40 @@ export function parseConfig(raw: unknown): Config {
       liveness.nonceEnabled = l.nonce_enabled;
     }
     if (l.idle_timeout_seconds !== undefined) {
-      const v = l.idle_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].idle_timeout_seconds must be a positive integer");
-      }
-      liveness.idleTimeoutSeconds = v;
+      liveness.idleTimeoutSeconds = parseLivenessBoundedInt(l.idle_timeout_seconds, "idle_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
     if (l.resume_attempts !== undefined) {
-      const v = l.resume_attempts;
-      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
-        throw new ConfigError("[liveness].resume_attempts must be a non-negative integer");
-      }
-      liveness.resumeAttempts = v;
+      liveness.resumeAttempts = parseLivenessBoundedInt(l.resume_attempts, "resume_attempts", { min: 0 });
     }
     if (l.startup_timeout_seconds !== undefined) {
-      const v = l.startup_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
-        throw new ConfigError(
-          `[liveness].startup_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
-        );
-      }
-      liveness.startupTimeoutSeconds = v;
+      liveness.startupTimeoutSeconds = parseLivenessBoundedInt(l.startup_timeout_seconds, "startup_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
     if (l.overall_timeout_seconds !== undefined) {
-      const v = l.overall_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
-        throw new ConfigError(
-          `[liveness].overall_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
-        );
-      }
-      liveness.overallTimeoutSeconds = v;
+      liveness.overallTimeoutSeconds = parseLivenessBoundedInt(l.overall_timeout_seconds, "overall_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
     if (l.deadline_seconds !== undefined) {
-      const v = l.deadline_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].deadline_seconds must be a positive integer");
-      }
-      liveness.deadlineSeconds = v;
+      liveness.deadlineSeconds = parseLivenessBoundedInt(l.deadline_seconds, "deadline_seconds", { min: 1 });
     }
     if (l.kill_grace_seconds !== undefined) {
-      const v = l.kill_grace_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
-        throw new ConfigError(
-          `[liveness].kill_grace_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
-        );
-      }
-      liveness.killGraceSeconds = v;
+      liveness.killGraceSeconds = parseLivenessBoundedInt(l.kill_grace_seconds, "kill_grace_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
     if (l.probe_timeout_seconds !== undefined) {
-      const v = l.probe_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0 || v > MAX_SETTIMEOUT_SECONDS) {
-        throw new ConfigError(
-          `[liveness].probe_timeout_seconds must be a positive integer no greater than ${MAX_SETTIMEOUT_SECONDS} (Node's setTimeout max delay)`,
-        );
-      }
-      liveness.probeTimeoutSeconds = v;
+      liveness.probeTimeoutSeconds = parseLivenessBoundedInt(l.probe_timeout_seconds, "probe_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
   }
 
