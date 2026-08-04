@@ -19,19 +19,6 @@ Still outstanding from that design:
   are verified against **0.80.10** only — a host with an older or newer pi fails at spawn time or,
   worse, silently drifts off-contract. Consider a startup version probe.
 
-## Correctness
-- **`extensions/flat-edit.ts` is never loaded — R3 is live in production.** The extension was
-  committed alongside the June experiment tooling and validated 3/3 e2e, but nothing wires it
-  in: `agentdir.ts` writes only `models.json` + `settings.json`, and `launch.ts` passes no extension
-  or `--tools` args. So pi's built-in `edit` tool, with its nested `edits[].oldText` schema, is what
-  DeepSeek-via-NanoGPT actually gets — the exact deterministic DSML failure the extension exists to
-  fix. Reproduced 2026-07-21 on pi 0.80.10: editing an existing file via `--family deepseek` fails
-  with *"Upstream emitted malformed tool call data that could not be repaired"*, exit 1, file
-  unchanged; the identical task on `--family glm` succeeds. Only *edits* are affected — creating a
-  file uses `write` and works, which is why the smoke tests missed it.
-  Wiring it also needs the `--tools` allowlist caveat honoured: a custom override is SILENTLY
-  inactive unless `edit` stays in the allowlist (pi sdk.ts:249).
-
 ## Reliability / robustness
 - **Process-group / detached grandchild kill.** The hang backstop force-resolves and unrefs, so the
   Pykrete process exits, but a grandchild that inherited the stdout pipe is abandoned (left running).

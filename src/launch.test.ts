@@ -80,6 +80,16 @@ test("session flags: --session-dir and --continue appear, --no-session does not"
   assert.doesNotMatch(r.outcome.text, /--no-session/);
 });
 
+test("deepseek/ candidates get the flat-edit extension appended", async () => {
+  const r = await launchAttempt(base("deepseek/dumpargs"));
+  assert.match(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
+});
+
+test("non-deepseek candidates do not get the flat-edit extension", async () => {
+  const r = await launchAttempt(base("dumpargs"));
+  assert.doesNotMatch(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
+});
+
 test("prompt is delivered to pi on stdin, not argv", async () => {
   const r = await launchAttempt({ ...base("echostdin"), prompt: "HELLO-STDIN" });
   assert.equal(r.outcome.text, "HELLO-STDIN");

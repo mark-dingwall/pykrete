@@ -130,7 +130,7 @@ src/launch.ts      spawn pi, watchdogs          src/pi-events.ts   --mode json s
 src/classify.ts    outcome → verdict            src/failover.ts    candidate loop → exit code
 src/runCandidate.ts  one candidate, incl. nonce-resume
 docs/BACKLOG.md    known gaps        docs/superpowers/  specs and plans
-extensions/        pi extensions (flat-edit — NOT currently wired in; see backlog)
+extensions/        pi extensions (flat-edit — wired in for deepseek/ candidates only)
 ```
 
 Only `smol-toml` is a runtime dependency.
