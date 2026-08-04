@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, type LivenessConfig } from "./config.ts";
+import { loadConfig, type LivenessConfig, type RetryConfig } from "./config.ts";
 import { resolveArgs } from "./args.ts";
 import { buildCandidates, type Resolution } from "./resolve.ts";
 import { intersects, loadCatalog, reorder } from "./catalog.ts";
@@ -40,6 +40,7 @@ export interface RunResult extends Resolution {
   family: string;
   prompt?: string;
   liveness: LivenessConfig;
+  retry: RetryConfig;
 }
 
 export async function run(argv: string[], deps: RunDeps = {}): Promise<RunResult> {
@@ -79,5 +80,5 @@ export async function run(argv: string[], deps: RunDeps = {}): Promise<RunResult
   if (config.liveness.idleTimeoutSeconds <= 300) {
     warn(`pykrete: idle_timeout_seconds=${config.liveness.idleTimeoutSeconds} is within pi's 300s HTTP idle window; slow-but-alive streams may be killed early`);
   }
-  return { candidates: ordered, intendedLead, task, family, prompt: parsed.prompt, liveness: config.liveness };
+  return { candidates: ordered, intendedLead, task, family, prompt: parsed.prompt, liveness: config.liveness, retry: config.retry };
 }
