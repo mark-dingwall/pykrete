@@ -10,10 +10,34 @@
  * Use with the built-in edit excluded, e.g.:
  *   pi --tools read,write,ls,bash -e extensions/flat-edit.ts ...
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+const EditParams = Type.Object({
+	path: Type.String({ description: "Path to the file to edit" }),
+	oldText: Type.String({ description: "Exact existing text to replace (must be unique in the file)" }),
+	newText: Type.String({ description: "Replacement text" }),
+});
+
+// Narrow structural type for the one pi extension API this file calls. Deliberately not importing
+// pi's SDK (CLAUDE.md: "Never import from pi's SDK") — this keeps typecheck decoupled from pi's
+// frequently-reshuffled package.
+interface ExtensionAPI {
+	registerTool(tool: {
+		name: string;
+		label: string;
+		description: string;
+		parameters: typeof EditParams;
+		execute: (
+			toolCallId: string,
+			params: Static<typeof EditParams>,
+			signal: AbortSignal,
+			onUpdate: (update: unknown) => void,
+			ctx: unknown,
+		) => Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
+	}): void;
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
@@ -21,11 +45,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Edit (flat)",
 		description:
 			"Edit a single file using exact text replacement. oldText must match exactly one region of the file; it is replaced with newText. Include enough surrounding context in oldText to make the match unique.",
-		parameters: Type.Object({
-			path: Type.String({ description: "Path to the file to edit" }),
-			oldText: Type.String({ description: "Exact existing text to replace (must be unique in the file)" }),
-			newText: Type.String({ description: "Replacement text" }),
-		}),
+		parameters: EditParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const file = path.resolve(params.path);
 			if (!fs.existsSync(file)) throw new Error(`File not found: ${params.path}`);

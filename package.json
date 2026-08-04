@@ -20,11 +20,6 @@
   "devDependencies": {
     "typescript": "^5.5.0",
     "@types/node": "^22.0.0",
-    "typebox": "1.1.38",
-    "@earendil-works/pi-coding-agent": "0.80.10"
-  },
-  "allowScripts": {
-    "@google/genai@1.52.0": true,
-    "protobufjs@7.6.5": true
+    "typebox": "1.1.38"
   }
 }

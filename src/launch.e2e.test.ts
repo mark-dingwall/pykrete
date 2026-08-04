@@ -32,6 +32,7 @@ test(
 
     const r = await launchAttempt({
       candidate: DS4_MODEL!,
+      family: "deepseek",
       prompt: `Edit the file at ${targetFile} by replacing its exact contents "before" with "after". Use the edit tool.`,
       agentDir: agent.dir,
       apiKey: process.env.NANOGPT_API_KEY,
