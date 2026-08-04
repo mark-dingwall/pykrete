@@ -80,12 +80,24 @@ test("session flags: --session-dir and --continue appear, --no-session does not"
   assert.doesNotMatch(r.outcome.text, /--no-session/);
 });
 
-test("deepseek/ candidates get the flat-edit extension appended", async () => {
-  const r = await launchAttempt(base("deepseek/dumpargs"));
+test("deepseek-family candidates get the flat-edit extension appended", async () => {
+  const r = await launchAttempt({ ...base("dumpargs"), family: "deepseek" });
   assert.match(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
 });
 
-test("non-deepseek candidates do not get the flat-edit extension", async () => {
+test("a deepseek-family candidate with a non-deepseek/ alias still gets the extension", async () => {
+  // TEE/deepseek-v4-pro:thinking is the deepseek family's own lead candidate (src/resolve.test.ts)
+  // and doesn't start with "deepseek/" — the family, not the candidate id, must gate this.
+  const r = await launchAttempt({ ...base("dumpargs"), candidate: "TEE/deepseek-v4-pro:thinking-dumpargs", family: "deepseek" });
+  assert.match(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
+});
+
+test("non-deepseek families do not get the flat-edit extension", async () => {
+  const r = await launchAttempt({ ...base("dumpargs"), family: "glm" });
+  assert.doesNotMatch(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
+});
+
+test("no family provided does not get the flat-edit extension", async () => {
   const r = await launchAttempt(base("dumpargs"));
   assert.doesNotMatch(r.outcome.text, /-e \S*extensions\/flat-edit\.ts/);
 });

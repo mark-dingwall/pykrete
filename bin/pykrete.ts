@@ -107,6 +107,7 @@ async function main(): Promise<number> {
               launch: (req) =>
                 launchAttempt({
                   candidate,
+                  family: resolved.family,
                   prompt: req.prompt,
                   agentDir: agent.dir,
                   apiKey,
