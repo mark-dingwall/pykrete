@@ -38,11 +38,15 @@ authoritative.
 pi gates custom tools through `isAllowedTool` (sdk.ts:249). Drop `edit` from the allowlist while
 overriding `edit` and you get no error — just the built-in behaviour back, quietly.
 
-**`extensions/flat-edit.ts` is not wired in.** It exists, it was validated, and nothing loads it.
-That means R3 is live: DeepSeek-via-NanoGPT deterministically fails on pi's nested `edits[].oldText`
-schema. Creating files works (that's `write`); *editing* an existing file with `--family deepseek`
-fails with "Upstream emitted malformed tool call data that could not be repaired". Don't assume the
-extension is active because it's in the tree.
+**`extensions/flat-edit.ts` is wired in, gated on the `deepseek` family.** `launch.ts` appends
+`-e <path to flat-edit.ts>` in `launchAttempt` when `opts.family === "deepseek"` (the resolved
+family from `src/cli.ts`, threaded down through `bin/pykrete.ts`). It overrides pi's built-in `edit`
+tool (nested `edits[].oldText` schema, which DeepSeek-via-NanoGPT deterministically fails) with a
+flat-string schema. Gating on family rather than a `candidate.startsWith("deepseek/")` id check
+matters: the deepseek family's own lead candidate, `TEE/deepseek-v4-pro:thinking`, doesn't start
+with `deepseek/` and would silently miss the extension under an id-prefix check. No `--tools`
+allowlist flag is passed, so the "custom tool overrides are silently inactive unless the tool stays
+in the allowlist" tripwire above doesn't apply here.
 
 **`bin/pykrete.ts` loads `.env`, but only the CLI path.** It calls `process.loadEnvFile()` before
 anything else and preflights `NANOGPT_API_KEY`, exiting 2 with a clear message if it's absent — a

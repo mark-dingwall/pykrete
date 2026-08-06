@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { createPiEventsAccumulator, type PiRunOutcome } from "./pi-events.ts";
+
+// DeepSeek-via-NanoGPT deterministically fails pi's built-in nested edits[].oldText schema
+// ("malformed_tool_call"); this flat-string override fixes it. Scoped to the deepseek family
+// (not a candidate-id prefix check: the family's own NanoGPT aliases, e.g. TEE/deepseek-v4-pro,
+// don't start with "deepseek/").
+const FLAT_EDIT_PATH = fileURLToPath(new URL("../extensions/flat-edit.ts", import.meta.url));
 
 export interface HeartbeatInfo {
   candidate: string;
@@ -11,6 +18,7 @@ export interface HeartbeatInfo {
 
 export interface LaunchOptions {
   candidate: string;
+  family?: string;
   prompt: string;
   agentDir: string;
   apiKey?: string;
@@ -45,6 +53,7 @@ export function launchAttempt(opts: LaunchOptions): Promise<AttemptOutcome> {
   // so pi's startup chores are pure liability here. Verified: a run with --offline returns
   // normally. The startup watchdog remains as a backstop.
   const args = ["-p", "--mode", "json", "--offline", "--provider", "nanogpt", "--model", opts.candidate];
+  if (opts.family === "deepseek") args.push("-e", FLAT_EDIT_PATH);
   if (opts.sessionDir !== undefined) args.push("--session-dir", opts.sessionDir);
   if (opts.continueSession) args.push("--continue");
   // The prompt goes on pi's STDIN, never argv: a review prompt can exceed Linux MAX_ARG_STRLEN

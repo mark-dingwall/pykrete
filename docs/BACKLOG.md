@@ -18,19 +18,13 @@ Still outstanding from that design:
   `PYKRETE_PI_BIN`); nothing in `package.json` declares or version-checks it. The four pi contracts
   are verified against **0.80.10** only — a host with an older or newer pi fails at spawn time or,
   worse, silently drifts off-contract. Consider a startup version probe.
-
-## Correctness
-- **`extensions/flat-edit.ts` is never loaded — R3 is live in production.** The extension was
-  committed alongside the June experiment tooling and validated 3/3 e2e, but nothing wires it
-  in: `agentdir.ts` writes only `models.json` + `settings.json`, and `launch.ts` passes no extension
-  or `--tools` args. So pi's built-in `edit` tool, with its nested `edits[].oldText` schema, is what
-  DeepSeek-via-NanoGPT actually gets — the exact deterministic DSML failure the extension exists to
-  fix. Reproduced 2026-07-21 on pi 0.80.10: editing an existing file via `--family deepseek` fails
-  with *"Upstream emitted malformed tool call data that could not be repaired"*, exit 1, file
-  unchanged; the identical task on `--family glm` succeeds. Only *edits* are affected — creating a
-  file uses `write` and works, which is why the smoke tests missed it.
-  Wiring it also needs the `--tools` allowlist caveat honoured: a custom override is SILENTLY
-  inactive unless `edit` stays in the allowlist (pi sdk.ts:249).
+- **Packed/npm-installed CLI cannot execute its raw TypeScript entrypoint.** `package.json` exposes
+  `bin/pykrete.ts` directly and publishes no compiled JavaScript. Node 22's native type stripping
+  deliberately refuses TypeScript beneath `node_modules`, so an npm/npx-installed copy fails with
+  `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` before Pykrete starts. `npm link` from a source
+  checkout works because the package resolves outside `node_modules`, which masks the distribution
+  failure. Emit/publish JavaScript, point `bin` at that artifact, and add a packed-install smoke test.
+  (PR #3 review, 2026-08-06; pre-existing at the PR's merge base.)
 
 ## Reliability / robustness
 - **Process-group / detached grandchild kill.** The hang backstop force-resolves and unrefs, so the
@@ -51,6 +45,15 @@ Still outstanding from that design:
 - **bin exit-1 e2e** (fatal/transient run-error) case — the matrix covers 0/2/3/4 but not 1.
 - **Negative-space stdout assertion** — `assert.doesNotMatch(stdout, /pykrete:/)` so diagnostics
   can't regress onto stdout.
+- **Make flat-edit launch-path assertions platform/path-safe.** `src/launch.test.ts` checks a
+  space-joined argv string with a POSIX-only `/extensions/flat-edit.ts` regex and `\S*`; it can fail
+  on Windows or when the checkout/install path contains spaces even though `spawn()` receives the
+  correct argv array. Have the fake pi emit structured JSON argv and assert adjacent `-e`/path
+  elements. (PR #3 review, 2026-08-06; Minor.)
+- **Add a dedicated flat-edit BOM preservation regression.** The implementation strips a leading
+  UTF-8 BOM from matching space and restores it on write, but the focused filesystem tests do not
+  enter that branch. Add a fixture that asserts exactly one leading BOM survives an edit, ideally
+  combined with CRLF. (PR #3 review, 2026-08-06; Minor.)
 - classify: assert the `.message` field on fatal/transient verdicts; `parseStatus` anchor guard test;
   unknown-`stopReason` coverage.
 - **`agentdir.test.ts` guards check key NAMES, not pi's schema constraints.** The transcribed key
