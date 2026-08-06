@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_RETRY } from "./config.ts";
 
 export interface NanogptProviderOptions {
   baseUrl?: string;
@@ -21,15 +22,21 @@ export function buildModelsJson(candidates: string[], opts: NanogptProviderOptio
   };
 }
 
+export interface RetrySettingsOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxRetryDelayMs?: number;
+}
+
 // Pin pi's native transient retry (same model, same session, backoff + Retry-After).
-// These match pi's documented defaults; centralised here as the tuning knob.
-export function buildSettingsJson(): unknown {
+// Defaults match pi's documented defaults; overridable via [retry] in pykrete.toml (config.ts).
+export function buildSettingsJson(opts: RetrySettingsOptions = {}): unknown {
   return {
     retry: {
       enabled: true,
-      maxRetries: 3,
-      baseDelayMs: 2000,
-      provider: { maxRetryDelayMs: 60000 },
+      maxRetries: opts.maxRetries ?? DEFAULT_RETRY.maxRetries,
+      baseDelayMs: opts.baseDelayMs ?? DEFAULT_RETRY.baseDelayMs,
+      provider: { maxRetryDelayMs: opts.maxRetryDelayMs ?? DEFAULT_RETRY.maxRetryDelayMs },
     },
   };
 }

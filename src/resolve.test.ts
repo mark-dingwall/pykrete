@@ -15,7 +15,25 @@ const cfg: Config = {
     general: { glm: "zai-org/glm-5.2", kimi: "moonshotai/kimi-k2.6:thinking" },
     code: { glm: "zai-org/glm-5.2:thinking", kimi: "moonshotai/kimi-k2.7-code" },
   },
-  liveness: { nonceEnabled: true, idleTimeoutSeconds: 330, resumeAttempts: 1 },
+  liveness: {
+    nonceEnabled: true,
+    idleTimeoutSeconds: 330,
+    resumeAttempts: 1,
+    startupTimeoutSeconds: 180,
+    overallTimeoutSeconds: 1800,
+    deadlineSeconds: 3600,
+    killGraceSeconds: 5,
+    probeTimeoutSeconds: 4,
+  },
+  retry: {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxRetryDelayMs: 60000,
+    outageBackoffBaseMs: 1000,
+    outageBackoffFactor: 2,
+    outageBackoffCapMs: 1_024_000,
+    maxOutageRetries: 10,
+  },
 };
 
 test("task ▸ general ▸ ranked, deduped (code/glm)", () => {

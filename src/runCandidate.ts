@@ -1,5 +1,6 @@
 // src/runCandidate.ts
 import { classify, type Verdict } from "./classify.ts";
+import { DEFAULT_RETRY } from "./config.ts";
 import type { AttemptOutcome } from "./launch.ts";
 import { mintNonce, buildSuffix, buildResumePrompt, noncePresent, stripSentinel } from "./nonce.ts";
 import type { Reachability } from "./reachability.ts";
@@ -8,6 +9,10 @@ export interface CandidateContext {
   prompt: string;
   nonceEnabled: boolean;
   resumeAttempts: number;
+  backoffBaseMs?: number;
+  backoffFactor?: number;
+  backoffCapMs?: number;
+  maxOutageRetries?: number;
 }
 
 export interface RunCandidateDeps {
@@ -26,10 +31,12 @@ export type CandidateResult = (
   | { kind: "transient"; message: string }
 ) & { pausedMs: number };
 
-const BACKOFF_BASE_MS = 1_000;
-const BACKOFF_FACTOR = 2;
-const BACKOFF_CAP_MS = 1_024_000; // 2^10 s
-const MAX_OUTAGE_RETRIES = 10; // backstop against a flapping network (recover->relaunch->re-outage forever)
+// Fallback defaults, used only when a caller constructs CandidateContext without going through
+// config.ts (e.g. tests). Sourced from DEFAULT_RETRY so they can't drift from the config defaults.
+const BACKOFF_BASE_MS = DEFAULT_RETRY.outageBackoffBaseMs;
+const BACKOFF_FACTOR = DEFAULT_RETRY.outageBackoffFactor;
+const BACKOFF_CAP_MS = DEFAULT_RETRY.outageBackoffCapMs;
+const MAX_OUTAGE_RETRIES = DEFAULT_RETRY.maxOutageRetries; // backstop against a flapping network (recover->relaunch->re-outage forever)
 
 // One gate handles ALL outage/throttle waiting. `proceed` = API was up on the first probe (no outage,
 // route per verdict). `recovered` = it was down/throttled, we backed off, it came back (retry the same
@@ -44,20 +51,24 @@ type GateResult =
 
 export async function runCandidate(ctx: CandidateContext, deps: RunCandidateDeps): Promise<CandidateResult> {
   let pausedMs = 0;
+  const backoffBaseMs = ctx.backoffBaseMs ?? BACKOFF_BASE_MS;
+  const backoffFactor = ctx.backoffFactor ?? BACKOFF_FACTOR;
+  const backoffCapMs = ctx.backoffCapMs ?? BACKOFF_CAP_MS;
+  const maxOutageRetries = ctx.maxOutageRetries ?? MAX_OUTAGE_RETRIES;
 
   const gate = async (): Promise<GateResult> => {
     const first = await deps.probe();
     if (first === "up") return { kind: "proceed" };
     // down | throttled -> exponential backoff-wait (D6: a 429 is reachable but still warrants backoff)
     const label = first === "throttled" ? "rate-limited" : "unreachable";
-    let delay = BACKOFF_BASE_MS;
-    while (delay <= BACKOFF_CAP_MS) {
+    let delay = backoffBaseMs;
+    while (delay <= backoffCapMs) {
       deps.warn(`pykrete: NanoGPT ${label}; waiting ${Math.round(delay / 1000)}s before re-probe`);
       await deps.sleep(delay);
       pausedMs += delay;
       const p = await deps.probe();
       if (p === "up") return { kind: "recovered" };
-      delay *= BACKOFF_FACTOR;
+      delay *= backoffFactor;
     }
     return { kind: "giveup", message: `NanoGPT ${label}; gave up after backoff` };
   };
@@ -100,7 +111,7 @@ export async function runCandidate(ctx: CandidateContext, deps: RunCandidateDeps
     // already produced we MUST resume to preserve it; if we cannot (nonce disabled, or pi wrote no
     // resumable session), that is the unified partial terminal (FIX B/D) — never a blind fresh re-run.
     const retrySameCandidateAfterOutage = async (): Promise<CandidateResult | "looped"> => {
-      if (++outageRetries > MAX_OUTAGE_RETRIES) {
+      if (++outageRetries > maxOutageRetries) {
         return { kind: "transient", message: "NanoGPT connectivity too unstable; gave up", pausedMs };
       }
       if (!sawOutput) {

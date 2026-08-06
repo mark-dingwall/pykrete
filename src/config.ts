@@ -9,6 +9,21 @@ export interface LivenessConfig {
   nonceEnabled: boolean;
   idleTimeoutSeconds: number;
   resumeAttempts: number;
+  startupTimeoutSeconds: number;
+  overallTimeoutSeconds: number;
+  deadlineSeconds: number;
+  killGraceSeconds: number;
+  probeTimeoutSeconds: number;
+}
+
+export interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxRetryDelayMs: number;
+  outageBackoffBaseMs: number;
+  outageBackoffFactor: number;
+  outageBackoffCapMs: number;
+  maxOutageRetries: number;
 }
 
 export interface Config {
@@ -17,6 +32,7 @@ export interface Config {
   families: Record<string, string[]>;
   defaults: Record<string, Record<string, string>>;
   liveness: LivenessConfig;
+  retry: RetryConfig;
 }
 
 export class ConfigError extends Error {}
@@ -26,9 +42,61 @@ const DEFAULT_TTL = 3600;
 // idleTimeoutSeconds default 330 sits deliberately OUTSIDE pi's 300s HTTP idle window (see Global
 // Constraints) so pi's own abort/self-retry fires before Pykrete's watchdog. resumeAttempts default 1;
 // note the deadline caveat below (a single candidate's resume loop can consume up to
-// (resumeAttempts+1) x OVERALL_TIMEOUT_MS of non-paused wall-time, since the overall deadline is
+// (resumeAttempts+1) x overallTimeoutSeconds of non-paused wall-time, since the overall deadline is
 // enforced BETWEEN candidates, not within one — see Task 8 design note).
-const DEFAULT_LIVENESS: LivenessConfig = { nonceEnabled: true, idleTimeoutSeconds: 330, resumeAttempts: 1 };
+const DEFAULT_LIVENESS: LivenessConfig = {
+  nonceEnabled: true,
+  idleTimeoutSeconds: 330,
+  resumeAttempts: 1,
+  startupTimeoutSeconds: 180,
+  overallTimeoutSeconds: 1800,
+  deadlineSeconds: 3600,
+  killGraceSeconds: 5,
+  probeTimeoutSeconds: 4,
+};
+
+// maxRetries/baseDelayMs/maxRetryDelayMs are pi's own same-model transient retry, passed through to
+// the generated settings.json. outageBackoff*/maxOutageRetries are Pykrete's own reachability-probe
+// backoff ladder in runCandidate.ts (distinct mechanism: retrying a probe, not a model request).
+export const DEFAULT_RETRY: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 2000,
+  maxRetryDelayMs: 60000,
+  outageBackoffBaseMs: 1000,
+  outageBackoffFactor: 2,
+  outageBackoffCapMs: 1_024_000,
+  maxOutageRetries: 10,
+};
+
+// Every field checked against these eventually reaches node:timers `setTimeout`, whose delay is a
+// 32-bit signed int internally; Node clamps any value outside [1, 2147483647] down to ~1ms (fires
+// almost immediately) instead of erroring. An operator setting a huge value to mean "effectively
+// unlimited" would otherwise get the opposite. Reject anything that would silently invert intent.
+const MAX_SETTIMEOUT_MS = 2_147_483_647;
+const MAX_SETTIMEOUT_SECONDS = Math.floor(MAX_SETTIMEOUT_MS / 1000); // 2_147_483
+
+// A factor near 1 makes the outage-backoff ladder (base_ms * factor^n, capped at cap_ms) take days of
+// wall-clock time to exhaust — e.g. 1.001 takes ~6900 steps and ~12 days to reach the default cap. The
+// shipped default of 2 gives the intended 1s/2s/4s/.../1024s ladder (~34min total); this floor only
+// blocks pathological near-1 overrides.
+const MIN_OUTAGE_BACKOFF_FACTOR = 1.15;
+
+// Shared shape for bounded-int config fields: all are either positive (min 1) or non-negative
+// (min 0), and some additionally cap at a setTimeout-safe max. Centralizing this after
+// idle_timeout_seconds shipped without the ceiling its [liveness] siblings got — that drift is
+// exactly what duplicated blocks make easy to miss.
+function parseBoundedInt(section: string, raw: unknown, key: string, opts: { min: 0 | 1; max?: number }): number {
+  const bound = opts.min === 0 ? "non-negative" : "positive";
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < opts.min || (opts.max !== undefined && raw > opts.max)) {
+    if (opts.max !== undefined) {
+      throw new ConfigError(
+        `[${section}].${key} must be a ${bound} integer no greater than ${opts.max} (Node's setTimeout max delay)`,
+      );
+    }
+    throw new ConfigError(`[${section}].${key} must be a ${bound} integer`);
+  }
+  return raw;
+}
 
 export function parseConfig(raw: unknown): Config {
   if (typeof raw !== "object" || raw === null) {
@@ -115,22 +183,123 @@ export function parseConfig(raw: unknown): Config {
       liveness.nonceEnabled = l.nonce_enabled;
     }
     if (l.idle_timeout_seconds !== undefined) {
-      const v = l.idle_timeout_seconds;
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new ConfigError("[liveness].idle_timeout_seconds must be a positive integer");
-      }
-      liveness.idleTimeoutSeconds = v;
+      liveness.idleTimeoutSeconds = parseBoundedInt("liveness", l.idle_timeout_seconds, "idle_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
     if (l.resume_attempts !== undefined) {
-      const v = l.resume_attempts;
-      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
-        throw new ConfigError("[liveness].resume_attempts must be a non-negative integer");
-      }
-      liveness.resumeAttempts = v;
+      liveness.resumeAttempts = parseBoundedInt("liveness", l.resume_attempts, "resume_attempts", { min: 0 });
+    }
+    if (l.startup_timeout_seconds !== undefined) {
+      liveness.startupTimeoutSeconds = parseBoundedInt("liveness", l.startup_timeout_seconds, "startup_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
+    }
+    if (l.overall_timeout_seconds !== undefined) {
+      liveness.overallTimeoutSeconds = parseBoundedInt("liveness", l.overall_timeout_seconds, "overall_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
+    }
+    if (l.deadline_seconds !== undefined) {
+      liveness.deadlineSeconds = parseBoundedInt("liveness", l.deadline_seconds, "deadline_seconds", { min: 1 });
+    }
+    if (l.kill_grace_seconds !== undefined) {
+      liveness.killGraceSeconds = parseBoundedInt("liveness", l.kill_grace_seconds, "kill_grace_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
+    }
+    if (l.probe_timeout_seconds !== undefined) {
+      liveness.probeTimeoutSeconds = parseBoundedInt("liveness", l.probe_timeout_seconds, "probe_timeout_seconds", {
+        min: 1,
+        max: MAX_SETTIMEOUT_SECONDS,
+      });
     }
   }
 
-  return { defaultFamily, catalog: { ttlSeconds }, families, defaults, liveness };
+  // Cross-field: if startup >= overall, overall_timeout_seconds always fires first (it races the
+  // startup timer from the same launch instant), so startup_timeout_seconds can never be the cause of
+  // a kill — dead config that misleads whoever set it. Checked against the fully-resolved values so a
+  // lone override of either field is still caught.
+  if (liveness.startupTimeoutSeconds >= liveness.overallTimeoutSeconds) {
+    throw new ConfigError(
+      "[liveness].startup_timeout_seconds must be less than overall_timeout_seconds (otherwise overall_timeout_seconds always fires first and startup_timeout_seconds is dead config)",
+    );
+  }
+
+  // retry — pi's native retry passthrough plus Pykrete's own outage-backoff ladder. All optional
+  // with defaults matching the prior hardcoded constants.
+  const retry: RetryConfig = { ...DEFAULT_RETRY };
+  const retryRaw = root.retry;
+  if (retryRaw !== undefined) {
+    if (typeof retryRaw !== "object" || retryRaw === null) {
+      throw new ConfigError("[retry] must be a table");
+    }
+    const r = retryRaw as Record<string, unknown>;
+    if (r.max_retries !== undefined) {
+      const v = r.max_retries;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new ConfigError("[retry].max_retries must be a non-negative integer");
+      }
+      retry.maxRetries = v;
+    }
+    if (r.base_delay_ms !== undefined) {
+      const v = r.base_delay_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].base_delay_ms must be a positive integer");
+      }
+      retry.baseDelayMs = v;
+    }
+    if (r.max_retry_delay_ms !== undefined) {
+      const v = r.max_retry_delay_ms;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new ConfigError("[retry].max_retry_delay_ms must be a positive integer");
+      }
+      retry.maxRetryDelayMs = v;
+    }
+    if (r.outage_backoff_base_ms !== undefined) {
+      retry.outageBackoffBaseMs = parseBoundedInt("retry", r.outage_backoff_base_ms, "outage_backoff_base_ms", {
+        min: 1,
+        max: MAX_SETTIMEOUT_MS,
+      });
+    }
+    if (r.outage_backoff_factor !== undefined) {
+      const v = r.outage_backoff_factor;
+      if (typeof v !== "number" || !Number.isFinite(v) || v < MIN_OUTAGE_BACKOFF_FACTOR) {
+        throw new ConfigError(
+          `[retry].outage_backoff_factor must be a number >= ${MIN_OUTAGE_BACKOFF_FACTOR} (a value near 1 makes the backoff ladder take days of wall-clock time to give up)`,
+        );
+      }
+      retry.outageBackoffFactor = v;
+    }
+    if (r.outage_backoff_cap_ms !== undefined) {
+      retry.outageBackoffCapMs = parseBoundedInt("retry", r.outage_backoff_cap_ms, "outage_backoff_cap_ms", {
+        min: 1,
+        max: MAX_SETTIMEOUT_MS,
+      });
+    }
+    if (r.max_outage_retries !== undefined) {
+      const v = r.max_outage_retries;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new ConfigError("[retry].max_outage_retries must be a non-negative integer");
+      }
+      retry.maxOutageRetries = v;
+    }
+  }
+
+  // Cross-field: cap must be able to hold at least one ladder step, or gate() in runCandidate.ts
+  // gives up on the first outage with zero backoff — silently disabling the whole mechanism.
+  // Checked against the fully-resolved values so a lone override of either field is still caught.
+  if (retry.outageBackoffCapMs < retry.outageBackoffBaseMs) {
+    throw new ConfigError(
+      "[retry].outage_backoff_cap_ms must be >= outage_backoff_base_ms (otherwise the backoff ladder never runs and a single outage blip gives up immediately)",
+    );
+  }
+
+  return { defaultFamily, catalog: { ttlSeconds }, families, defaults, liveness, retry };
 }
 
 export function loadConfig(path: string): Config {

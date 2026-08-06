@@ -11,9 +11,6 @@ import { runFailover } from "../src/failover.ts";
 import { runCandidate } from "../src/runCandidate.ts";
 import { probeNanoGpt } from "../src/reachability.ts";
 
-const STARTUP_TIMEOUT_MS = 180_000;
-const OVERALL_TIMEOUT_MS = 1_800_000;
-
 // Opt-in liveness for programmatic callers; off by default so interactive use stays quiet.
 function heartbeatMsFromEnv(): number | undefined {
   const raw = process.env.PYKRETE_HEARTBEAT_SECONDS;
@@ -92,7 +89,8 @@ async function main(): Promise<number> {
   const apiKey = process.env.NANOGPT_API_KEY;
   const heartbeatMs = heartbeatMsFromEnv();
   const liveness = resolved.liveness;
-  const agent = createAgentDir(buildModelsJson(resolved.candidates), buildSettingsJson());
+  const retry = resolved.retry;
+  const agent = createAgentDir(buildModelsJson(resolved.candidates), buildSettingsJson(retry));
   const sessionRoot = mkdtempSync(join(tmpdir(), "pykrete-sess-"));
   try {
     const result = await runFailover(
@@ -102,7 +100,15 @@ async function main(): Promise<number> {
           const sessionDir = join(sessionRoot, encodeURIComponent(candidate));
           mkdirSync(sessionDir, { recursive: true });
           return runCandidate(
-            { prompt, nonceEnabled: liveness.nonceEnabled, resumeAttempts: liveness.resumeAttempts },
+            {
+              prompt,
+              nonceEnabled: liveness.nonceEnabled,
+              resumeAttempts: liveness.resumeAttempts,
+              backoffBaseMs: retry.outageBackoffBaseMs,
+              backoffFactor: retry.outageBackoffFactor,
+              backoffCapMs: retry.outageBackoffCapMs,
+              maxOutageRetries: retry.maxOutageRetries,
+            },
             {
               launch: (req) =>
                 launchAttempt({
@@ -111,15 +117,22 @@ async function main(): Promise<number> {
                   prompt: req.prompt,
                   agentDir: agent.dir,
                   apiKey,
-                  startupTimeoutMs: STARTUP_TIMEOUT_MS,
-                  overallTimeoutMs: OVERALL_TIMEOUT_MS,
+                  startupTimeoutMs: liveness.startupTimeoutSeconds * 1000,
+                  overallTimeoutMs: liveness.overallTimeoutSeconds * 1000,
                   idleTimeoutMs: liveness.idleTimeoutSeconds * 1000,
+                  killGraceMs: liveness.killGraceSeconds * 1000,
                   sessionDir,
                   continueSession: req.continueSession,
                   heartbeatMs,
                   heartbeat: heartbeatMs ? emitHeartbeat : undefined,
                 }),
-              probe: () => probeNanoGpt({ fetchImpl: fetch, apiKey, url: process.env.PYKRETE_MODELS_URL }),
+              probe: () =>
+                probeNanoGpt({
+                  fetchImpl: fetch,
+                  apiKey,
+                  url: process.env.PYKRETE_MODELS_URL,
+                  timeoutMs: liveness.probeTimeoutSeconds * 1000,
+                }),
               sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
               // Resumable state = pi wrote a session transcript (a .jsonl), not merely that Pykrete's
               // own mkdirSync left the dir non-empty (D7). pi's --continue also filters candidate
@@ -140,6 +153,7 @@ async function main(): Promise<number> {
         now: Date.now,
         warn: (m) => console.error(m),
         emit: (text) => process.stdout.write(text.endsWith("\n") ? text : `${text}\n`),
+        deadlineMs: liveness.deadlineSeconds * 1000,
       },
     );
     return result.exitCode;

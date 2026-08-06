@@ -135,12 +135,42 @@ const baseCfg = { default_family: "glm", families: { glm: ["a"] } };
 
 test("liveness defaults when [liveness] omitted", () => {
   const c = parseConfig(baseCfg);
-  assert.deepEqual(c.liveness, { nonceEnabled: true, idleTimeoutSeconds: 330, resumeAttempts: 1 });
+  assert.deepEqual(c.liveness, {
+    nonceEnabled: true,
+    idleTimeoutSeconds: 330,
+    resumeAttempts: 1,
+    startupTimeoutSeconds: 180,
+    overallTimeoutSeconds: 1800,
+    deadlineSeconds: 3600,
+    killGraceSeconds: 5,
+    probeTimeoutSeconds: 4,
+  });
 });
 
 test("liveness values are read and typed", () => {
-  const c = parseConfig({ ...baseCfg, liveness: { nonce_enabled: false, idle_timeout_seconds: 90, resume_attempts: 2 } });
-  assert.deepEqual(c.liveness, { nonceEnabled: false, idleTimeoutSeconds: 90, resumeAttempts: 2 });
+  const c = parseConfig({
+    ...baseCfg,
+    liveness: {
+      nonce_enabled: false,
+      idle_timeout_seconds: 90,
+      resume_attempts: 2,
+      startup_timeout_seconds: 60,
+      overall_timeout_seconds: 900,
+      deadline_seconds: 1800,
+      kill_grace_seconds: 10,
+      probe_timeout_seconds: 8,
+    },
+  });
+  assert.deepEqual(c.liveness, {
+    nonceEnabled: false,
+    idleTimeoutSeconds: 90,
+    resumeAttempts: 2,
+    startupTimeoutSeconds: 60,
+    overallTimeoutSeconds: 900,
+    deadlineSeconds: 1800,
+    killGraceSeconds: 10,
+    probeTimeoutSeconds: 8,
+  });
 });
 
 test("liveness.idle_timeout_seconds must be a positive integer", () => {
@@ -154,4 +184,169 @@ test("liveness.resume_attempts may be 0 but not negative", () => {
 
 test("liveness.nonce_enabled must be a boolean", () => {
   assert.throws(() => parseConfig({ ...baseCfg, liveness: { nonce_enabled: "yes" } }), ConfigError);
+});
+
+test("liveness.startup_timeout_seconds, overall_timeout_seconds, deadline_seconds, kill_grace_seconds, probe_timeout_seconds must be positive integers", () => {
+  for (const key of [
+    "startup_timeout_seconds",
+    "overall_timeout_seconds",
+    "deadline_seconds",
+    "kill_grace_seconds",
+    "probe_timeout_seconds",
+  ]) {
+    assert.throws(() => parseConfig({ ...baseCfg, liveness: { [key]: 0 } }), ConfigError, `${key} = 0 should be rejected`);
+    assert.throws(() => parseConfig({ ...baseCfg, liveness: { [key]: 1.5 } }), ConfigError, `${key} = 1.5 should be rejected`);
+  }
+});
+
+test("retry defaults when [retry] omitted", () => {
+  const c = parseConfig(baseCfg);
+  assert.deepEqual(c.retry, {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxRetryDelayMs: 60000,
+    outageBackoffBaseMs: 1000,
+    outageBackoffFactor: 2,
+    outageBackoffCapMs: 1_024_000,
+    maxOutageRetries: 10,
+  });
+});
+
+test("retry values are read and typed", () => {
+  const c = parseConfig({
+    ...baseCfg,
+    retry: {
+      max_retries: 5,
+      base_delay_ms: 500,
+      max_retry_delay_ms: 30000,
+      outage_backoff_base_ms: 2000,
+      outage_backoff_factor: 3,
+      outage_backoff_cap_ms: 512000,
+      max_outage_retries: 4,
+    },
+  });
+  assert.deepEqual(c.retry, {
+    maxRetries: 5,
+    baseDelayMs: 500,
+    maxRetryDelayMs: 30000,
+    outageBackoffBaseMs: 2000,
+    outageBackoffFactor: 3,
+    outageBackoffCapMs: 512000,
+    maxOutageRetries: 4,
+  });
+});
+
+test("retry.max_retries and retry.max_outage_retries may be 0 but not negative", () => {
+  assert.equal(parseConfig({ ...baseCfg, retry: { max_retries: 0 } }).retry.maxRetries, 0);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { max_retries: -1 } }), ConfigError);
+  assert.equal(parseConfig({ ...baseCfg, retry: { max_outage_retries: 0 } }).retry.maxOutageRetries, 0);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { max_outage_retries: -1 } }), ConfigError);
+});
+
+test("retry.outage_backoff_factor must be at least 1.15", () => {
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 0.5 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.001 } }), ConfigError);
+  assert.throws(() => parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.1 } }), ConfigError);
+  assert.equal(parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.15 } }).retry.outageBackoffFactor, 1.15);
+  assert.equal(parseConfig({ ...baseCfg, retry: { outage_backoff_factor: 1.5 } }).retry.outageBackoffFactor, 1.5);
+});
+
+test("[retry] must be a table", () => {
+  assert.throws(() => parseConfig({ ...baseCfg, retry: "nope" }), ConfigError);
+});
+
+test("retry.outage_backoff_cap_ms must be >= outage_backoff_base_ms", () => {
+  // Both explicit, cap below base.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 5000, outage_backoff_cap_ms: 1000 } }),
+    ConfigError,
+  );
+  // Only base set, above the default cap (1_024_000) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 2_000_000 } }),
+    ConfigError,
+  );
+  // Only cap set, below the default base (1000) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_cap_ms: 500 } }),
+    ConfigError,
+  );
+  // Equal is the boundary case and must be accepted (loop runs exactly once).
+  const c = parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 1000, outage_backoff_cap_ms: 1000 } });
+  assert.equal(c.retry.outageBackoffCapMs, 1000);
+});
+
+test("liveness.startup_timeout_seconds must be less than overall_timeout_seconds", () => {
+  // Both explicit, startup above overall.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 900, overall_timeout_seconds: 600 } }),
+    ConfigError,
+  );
+  // Only startup set, above the default overall (1800) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 2000 } }),
+    ConfigError,
+  );
+  // Only overall set, below the default startup (180) — must still be caught.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { overall_timeout_seconds: 100 } }),
+    ConfigError,
+  );
+  // Equal is rejected too — startup would still never fire first.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 600, overall_timeout_seconds: 600 } }),
+    ConfigError,
+  );
+  const c = parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 599, overall_timeout_seconds: 600 } });
+  assert.equal(c.liveness.startupTimeoutSeconds, 599);
+});
+
+test("liveness timeout fields that feed setTimeout must not exceed Node's max delay (2147483647ms)", () => {
+  // overall_timeout_seconds, kill_grace_seconds, probe_timeout_seconds are independent of the
+  // startup/overall cross-check (or, for overall itself, satisfy it against the default startup=180).
+  const fields: [string, keyof Config["liveness"]][] = [
+    ["overall_timeout_seconds", "overallTimeoutSeconds"],
+    ["kill_grace_seconds", "killGraceSeconds"],
+    ["probe_timeout_seconds", "probeTimeoutSeconds"],
+  ];
+  for (const [snake, camel] of fields) {
+    assert.throws(
+      () => parseConfig({ ...baseCfg, liveness: { [snake]: 2_147_484 } }),
+      ConfigError,
+      `${snake} = 2_147_484 (over the max) should be rejected`,
+    );
+    const c = parseConfig({ ...baseCfg, liveness: { [snake]: 2_147_483 } });
+    assert.equal(c.liveness[camel], 2_147_483, `${snake} = 2_147_483 (the max) should be accepted`);
+  }
+
+  // startup_timeout_seconds can't reach the exact ceiling on its own — overall_timeout_seconds shares
+  // the same ceiling and must stay strictly greater (see the cross-check test above). Pair it with
+  // overall at its own ceiling to check the per-field ceiling arithmetic near the top of its range.
+  assert.throws(
+    () => parseConfig({ ...baseCfg, liveness: { startup_timeout_seconds: 2_147_484, overall_timeout_seconds: 2_147_483 } }),
+    ConfigError,
+    "startup_timeout_seconds = 2_147_484 (over the max) should be rejected",
+  );
+  const startupNearMax = parseConfig({
+    ...baseCfg,
+    liveness: { startup_timeout_seconds: 2_147_482, overall_timeout_seconds: 2_147_483 },
+  });
+  assert.equal(startupNearMax.liveness.startupTimeoutSeconds, 2_147_482);
+});
+
+test("retry.outage_backoff_base_ms and outage_backoff_cap_ms must not exceed Node's max setTimeout delay", () => {
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_base_ms: 2_147_483_648 } }),
+    /outage_backoff_base_ms must be a positive integer no greater than 2147483647/,
+  );
+  assert.throws(
+    () => parseConfig({ ...baseCfg, retry: { outage_backoff_cap_ms: 2_147_483_648 } }),
+    ConfigError,
+  );
+  const c = parseConfig({
+    ...baseCfg,
+    retry: { outage_backoff_base_ms: 2_147_483_647, outage_backoff_cap_ms: 2_147_483_647 },
+  });
+  assert.equal(c.retry.outageBackoffCapMs, 2_147_483_647);
 });
