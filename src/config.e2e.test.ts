@@ -12,7 +12,7 @@ import { newPiBin } from "./e2e-gate.ts";
 // PI_CODING_AGENT_DIR and spawns the *new* pi binary, proving the config is not
 // rejected and the custom nanogpt provider is not shadowed by pi.dev/R2 catalogs.
 //
-// GATED: skipped unless PYKRETE_NEW_PI_BIN points at the upgraded pi (~0.80.10).
+// GATED: skipped unless PYKRETE_NEW_PI_BIN points at the supported pi (~0.84.3).
 // Enable after the pi fast-forward:
 //   PYKRETE_NEW_PI_BIN=/path/to/new/pi \
 //   PYKRETE_E2E_CANDIDATE="<valid nanogpt model id>" \

@@ -20,9 +20,11 @@ Two design decisions follow from that job and are worth not re-litigating:
 imports nothing from pi's SDK. pi moves fast and reshuffles its SDK surface between minor versions
 (0.80.8 replaced `modelRegistry`/`authStorage` with `modelRuntime`); none of that reaches Pykrete.
 What Pykrete depends on instead is four narrow contracts — the `models.json` provider schema, the
-`settings.json` retry schema, the `--mode json` envelope, and extension loading — all of which have
-only ever changed additively. The cost is that `pi` is an undeclared runtime dependency resolved off
-`PATH`; see the backlog.
+`settings.json` retry schema, the `--mode json` envelope, and extension loading. pi 0.84.0 changed
+streaming updates from cumulative messages to text deltas; Pykrete assembles those deltas while
+continuing to treat `message_end` as authoritative. These contracts are version-reviewed rather
+than assumed stable. The cost is that `pi` is an undeclared runtime dependency resolved off `PATH`;
+see the backlog.
 
 **NanoGPT is the only provider.** Every candidate is a model entry under one `nanogpt` provider with
 one `baseUrl`, so every request goes to the same edge. That uniformity is load-bearing: it is what
@@ -59,7 +61,7 @@ those from the repo yourself first.
 ## Quickstart
 
 ```bash
-npm i -g @earendil-works/pi-coding-agent@0.80.10   # pi must be on PATH
+npm i -g @earendil-works/pi-coding-agent@~0.84.3   # pi must be on PATH
 cp pykrete.example.toml pykrete.toml               # config is required
 cp .env.example .env                               # fill in NANOGPT_API_KEY, or export it directly
 pykrete "Write hello.txt containing PONG."

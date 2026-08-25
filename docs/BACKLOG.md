@@ -16,8 +16,8 @@ Still outstanding from that design:
 (2026-07-21, found while bringing a clean host up to a working state.)
 - **`pi` is an undeclared runtime dependency.** `launch.ts` resolves a bare `"pi"` on PATH (or
   `PYKRETE_PI_BIN`); nothing in `package.json` declares or version-checks it. The four pi contracts
-  are verified against **0.80.10** only — a host with an older or newer pi fails at spawn time or,
-  worse, silently drifts off-contract. Consider a startup version probe.
+  support the **~0.84.3** line and are verified against exact **0.84.3** — a host outside that line
+  fails at spawn time or, worse, silently drifts off-contract. Consider a startup version probe.
 - **Packed/npm-installed CLI cannot execute its raw TypeScript entrypoint.** `package.json` exposes
   `bin/pykrete.ts` directly and publishes no compiled JavaScript. Node 22's native type stripping
   deliberately refuses TypeScript beneath `node_modules`, so an npm/npx-installed copy fails with
