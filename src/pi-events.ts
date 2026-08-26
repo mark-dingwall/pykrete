@@ -39,12 +39,15 @@ export function createPiEventsAccumulator(): PiEventsAccumulator {
   let text = "";
   let terminalText = "";
   let sawAssistantOutput = false;
-  const streamedTextBlocks = new Map<number, string>();
+  const streamedTextBlocks = new Map<number, string[]>();
+  let streamedTextDirty = false;
 
-  function updateStreamedText(): void {
+  function materializeStreamedText(): void {
+    if (!streamedTextDirty) return;
+    streamedTextDirty = false;
     const streamedText = [...streamedTextBlocks.entries()]
       .sort(([left], [right]) => left - right)
-      .map(([, block]) => block)
+      .map(([, chunks]) => chunks.join(""))
       .join("");
     if (streamedText.length > 0) {
       sawAssistantOutput = true;
@@ -56,15 +59,19 @@ export function createPiEventsAccumulator(): PiEventsAccumulator {
     if (!Number.isInteger(event.contentIndex) || (event.contentIndex as number) < 0) return;
     const contentIndex = event.contentIndex as number;
     if (event.type === "text_start") {
-      streamedTextBlocks.set(contentIndex, "");
+      streamedTextBlocks.set(contentIndex, []);
     } else if (event.type === "text_delta" && typeof event.delta === "string") {
-      streamedTextBlocks.set(contentIndex, (streamedTextBlocks.get(contentIndex) ?? "") + event.delta);
+      const chunks = streamedTextBlocks.get(contentIndex) ?? [];
+      chunks.push(event.delta);
+      streamedTextBlocks.set(contentIndex, chunks);
+      if (event.delta.length > 0) sawAssistantOutput = true;
     } else if (event.type === "text_end" && typeof event.content === "string") {
-      streamedTextBlocks.set(contentIndex, event.content);
+      streamedTextBlocks.set(contentIndex, [event.content]);
+      if (event.content.length > 0) sawAssistantOutput = true;
     } else {
       return;
     }
-    updateStreamedText();
+    streamedTextDirty = true;
   }
 
   function handleAssistant(msg: RawMessage, terminal: boolean): void {
@@ -79,6 +86,9 @@ export function createPiEventsAccumulator(): PiEventsAccumulator {
     if (turnText.length > 0) {
       sawAssistantOutput = true;
       text = turnText;
+      // A cumulative message carries authoritative full text, which must take precedence over
+      // older streamed deltas when result() materializes the stream later.
+      streamedTextDirty = false;
     }
     // The nonce liveness gate must read the genuinely-final block. Capture the terminal message's
     // text separately; only overwrite on a NON-EMPTY terminal turn so a trailing empty turn_end after
@@ -100,7 +110,10 @@ export function createPiEventsAccumulator(): PiEventsAccumulator {
         // pi 0.84.x's message_start can already contain the first streamed chunk, which is then
         // repeated by text_delta. Keep cumulative-message handling for older pi releases, but build
         // the new delta stream independently so that first chunk is not duplicated.
-        if (obj.type === "message_start") streamedTextBlocks.clear();
+        if (obj.type === "message_start") {
+          streamedTextBlocks.clear();
+          streamedTextDirty = false;
+        }
         handleAssistant(obj.message, terminal);
       }
       if (obj.type === "message_update" && obj.assistantMessageEvent) {
@@ -109,6 +122,7 @@ export function createPiEventsAccumulator(): PiEventsAccumulator {
       if (Array.isArray(obj.toolResults) && obj.toolResults.length > 0) sawAssistantOutput = true;
     },
     result(): PiRunOutcome {
+      materializeStreamedText();
       return { stopReason, errorMessage, model, text, terminalText, sawAssistantOutput };
     },
   };
