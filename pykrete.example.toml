@@ -2,7 +2,7 @@
 # `--config <path>`. Without it, Pykrete exits 2 with "cannot read config at pykrete.toml".
 #
 # PREREQUISITES
-#   1. `pi` on PATH (npm i -g @earendil-works/pi-coding-agent@0.80.10), or set PYKRETE_PI_BIN.
+#   1. `pi` on PATH (npm i -g @earendil-works/pi-coding-agent@~0.84.3), or set PYKRETE_PI_BIN.
 #   2. NANOGPT_API_KEY exported in the environment, or set in a `.env` file in this directory
 #      (see .env.example) — Pykrete reads `.env` automatically; a non-empty shell env still wins
 #      if both are set. A missing key exits 2 with a clear message.

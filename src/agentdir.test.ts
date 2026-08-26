@@ -77,7 +77,7 @@ const PROVIDER_SCHEMA_KEYS = new Set([
 // Model keys accepted by ModelDefinitionSchema (id required; rest Type.Optional):
 //   same file, ModelDefinitionSchema
 //   -> id, name, api, baseUrl, reasoning, thinkingLevelMap, input, cost,
-//      contextWindow, maxTokens, headers, compat
+//      contextWindow, maxTokens, samplingParams, headers, compat
 const MODEL_SCHEMA_KEYS = new Set([
   "id",
   "name",
@@ -89,6 +89,7 @@ const MODEL_SCHEMA_KEYS = new Set([
   "cost",
   "contextWindow",
   "maxTokens",
+  "samplingParams",
   "headers",
   "compat",
 ]);

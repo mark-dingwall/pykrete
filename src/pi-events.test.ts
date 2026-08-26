@@ -105,6 +105,59 @@ test("terminalText defaults to empty when no terminal event arrives", () => {
   assert.equal(r.terminalText, "");
 });
 
+// pi 0.84.x removed cumulative `message` snapshots from JSON-mode message_update events.
+// Streaming text now arrives only through assistantMessageEvent deltas. These guards exercise
+// Pykrete's boundary contract using the exact serialized field names from pi's JsonAgentSessionEvent.
+
+test("pi 0.84.x delta-only updates reconstruct partial text without duplicating message_start", () => {
+  const r = feed([
+    `{"type":"message_start","message":{"role":"assistant","content":[{"type":"text","text":"one"}],"stopReason":"pending"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"one"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" two"}}`,
+  ]);
+  assert.equal(r.text, "one two");
+  assert.equal(r.sawAssistantOutput, true);
+  assert.equal(r.stopReason, undefined);
+  assert.equal(r.terminalText, "");
+});
+
+test("pi 0.84.x delta text blocks are reconstructed in content-index order", () => {
+  const r = feed([
+    `{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":2}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":2,"delta":"second"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"first "}}`,
+  ]);
+  assert.equal(r.text, "first second");
+  assert.equal(r.sawAssistantOutput, true);
+});
+
+test("terminal message text overrides pi 0.84.x delta reconstruction", () => {
+  const r = feed([
+    `{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"partial WORK COMPLETE stale"}}`,
+    `{"type":"message_end","message":{"role":"assistant","model":"glm/x","content":[{"type":"text","text":"final answer"}],"stopReason":"stop"}}`,
+  ]);
+  assert.equal(r.text, "final answer");
+  assert.equal(r.terminalText, "final answer");
+  assert.equal(r.stopReason, "stop");
+  assert.equal(r.model, "glm/x");
+});
+
+test("pi 0.84.x delta text never becomes terminalText before a terminal event", () => {
+  const r = feed([
+    `{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`,
+    `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"WORK COMPLETE stale"}}`,
+  ]);
+  assert.equal(r.text, "WORK COMPLETE stale");
+  assert.equal(r.terminalText, "");
+  assert.equal(r.stopReason, undefined);
+});
+
 // --- pi 0.80.10 upgrade regression guards (pi commit e9fa5a68 / 351efc82) ---
 //
 // New pi emits a trailing lifecycle event AFTER the terminal assistant message. Its EXACT shape,

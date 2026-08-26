@@ -5,7 +5,7 @@ import { classify, parseStatus } from "./classify.ts";
 import { createAgentDir, buildModelsJson, buildSettingsJson } from "./agentdir.ts";
 import { newPiBin } from "./e2e-gate.ts";
 
-// Real-pi e2e, GATED behind PYKRETE_NEW_PI_BIN (path to the fast-forwarded 0.80.10 `pi` binary).
+// Real-pi e2e, GATED behind PYKRETE_NEW_PI_BIN (path to the supported 0.84.3 `pi` binary).
 // Skipped when the env var is unset (i.e. now); run after fast-forward to confirm the colon-form
 // fixtures in classify.test.ts match what the real new pi actually emits.
 //

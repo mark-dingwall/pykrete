@@ -1,7 +1,7 @@
 // src/pi-events.e2e.test.ts
 //
-// Real-pi end-to-end guard for the pi 0.80.2 -> 0.80.10 upgrade. GATED: skipped unless
-// PYKRETE_NEW_PI_BIN points at the new pi binary. Enable AFTER fast-forwarding pi:
+// Real-pi end-to-end guard for the supported pi 0.84.3 baseline. GATED: skipped unless
+// PYKRETE_NEW_PI_BIN points at that pi binary:
 //
 //   PYKRETE_NEW_PI_BIN=~/pi/bin/pi \
 //   NANOGPT_API_KEY=... \
@@ -12,8 +12,9 @@
 //
 // It spawns the real new pi exactly as Pykrete does (see src/launch.ts): `-p --mode json --offline
 // --provider <p> --model <m>`, prompt delivered on STDIN. It then asserts:
-//   (a) a trailing {"type":"agent_settled"} event actually appears in the raw JSONL stream, and
-//   (b) feeding the captured stream through createPiEventsAccumulator yields a correct terminal
+//   (a) delta-only message_update and trailing agent_settled events appear in the raw JSONL stream,
+//   (b) the update omits the pre-0.84 cumulative top-level message, and
+//   (c) feeding the captured stream through createPiEventsAccumulator yields a correct terminal
 //       outcome (a clean "stop" latched, assistant output seen, the requested answer in
 //       terminalText).
 import { test } from "node:test";
@@ -68,25 +69,32 @@ function runPi(prompt: string): Promise<CapturedRun> {
   });
 }
 
-test("real new pi emits a trailing agent_settled and the accumulator still reads the terminal outcome", { skip: !NEW_PI, timeout: TIMEOUT_MS + 5000 }, async () => {
+test("real pi 0.84.x emits delta-only updates and the accumulator still reads the terminal outcome", { skip: !NEW_PI, timeout: TIMEOUT_MS + 5000 }, async () => {
   const { lines } = await runPi("Reply with exactly the single word: PONG");
 
-  // (a) the new lifecycle event actually shows up, verbatim shape {"type":"agent_settled"}.
-  const settled = lines
+  // (a/b) Capture both 0.84.x's delta-only update and the trailing lifecycle event.
+  const events = lines
     .map((l) => {
       try {
-        return JSON.parse(l) as { type?: unknown };
+        return JSON.parse(l) as { type?: unknown; message?: unknown; assistantMessageEvent?: { type?: unknown } };
       } catch {
         return undefined;
       }
     })
-    .filter((e): e is { type?: unknown } => !!e && typeof e === "object");
+    .filter((e): e is { type?: unknown; message?: unknown; assistantMessageEvent?: { type?: unknown } } =>
+      !!e && typeof e === "object"
+    );
   assert.ok(
-    settled.some((e) => e.type === "agent_settled"),
-    `expected an agent_settled event in the stream; got types: ${settled.map((e) => e.type).join(",")}`,
+    events.some((e) => e.type === "agent_settled"),
+    `expected an agent_settled event in the stream; got types: ${events.map((e) => e.type).join(",")}`,
   );
+  const deltaUpdate = events.find(
+    (e) => e.type === "message_update" && e.assistantMessageEvent?.type === "text_delta",
+  );
+  assert.ok(deltaUpdate, "expected a delta-only text message_update from pi 0.84.x");
+  assert.equal(deltaUpdate.message, undefined, "pi 0.84.x message_update must omit the cumulative message");
 
-  // (b) the captured stream still yields a correct terminal outcome through Pykrete's accumulator.
+  // (c) the captured stream still yields a correct terminal outcome through Pykrete's accumulator.
   const acc = createPiEventsAccumulator();
   for (const l of lines) acc.push(l);
   const r = acc.result();
