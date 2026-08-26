@@ -134,6 +134,33 @@ test("pi 0.84.x delta text blocks are reconstructed in content-index order", () 
   assert.equal(r.sawAssistantOutput, true);
 });
 
+test("pi 0.84.x delta text is materialized only when result is requested", () => {
+  // This fails if push() returns to rebuilding all blocks for every delta, which makes a long
+  // response quadratic in copied characters. The accumulator remains real; Array#join is only
+  // observed to distinguish streaming accumulation from materialization at its public boundary.
+  const acc = createPiEventsAccumulator();
+  const arrayPrototype = Array.prototype as unknown as { join: (...args: unknown[]) => string };
+  const originalJoin = arrayPrototype.join;
+  let joins = 0;
+  let joinsDuringStreaming: number;
+  arrayPrototype.join = function (this: unknown[], ...args: unknown[]): string {
+    joins += 1;
+    return originalJoin.apply(this, args);
+  };
+
+  try {
+    acc.push(`{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`);
+    acc.push(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"first"}}`);
+    acc.push(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" second"}}`);
+    joinsDuringStreaming = joins;
+  } finally {
+    arrayPrototype.join = originalJoin;
+  }
+
+  assert.equal(joinsDuringStreaming, 0);
+  assert.equal(acc.result().text, "first second");
+});
+
 test("terminal message text overrides pi 0.84.x delta reconstruction", () => {
   const r = feed([
     `{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}`,
