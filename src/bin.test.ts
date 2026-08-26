@@ -72,6 +72,32 @@ test("all unavailable: exit 4, nothing on stdout", () => {
   assert.equal(r.stdout.trim(), "");
 });
 
+test("--help prints usage and exits 0 with no config or API key", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pykrete-help-"));
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--help"],
+    { encoding: "utf-8", cwd: dir, env: rest },
+  );
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /--help/);
+  assert.match(r.stdout, /--task/);
+  assert.match(r.stdout, /NANOGPT_API_KEY/);
+});
+
+test("-h short form prints usage and exits 0", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pykrete-help-"));
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "-h"],
+    { encoding: "utf-8", cwd: dir, env: rest },
+  );
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /Usage:/);
+});
+
 test("missing prompt: exit 2", () => {
   const configPath = writeConfig(["good-ok"]);
   const r = spawnSync(

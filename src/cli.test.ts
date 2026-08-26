@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseArgv, run } from "./cli.ts";
+import { parseArgv, run, wantsHelp, HELP } from "./cli.ts";
 
 function writeConfig(): string {
   const dir = mkdtempSync(join(tmpdir(), "pykrete-cli-"));
@@ -31,6 +31,19 @@ test("parseArgv extracts flags and the positional prompt", () => {
   assert.equal(p.family, "glm");
   assert.equal(p.prompt, "write a test");
   assert.equal(p.configPath, "pykrete.toml");
+});
+
+test("wantsHelp is true for --help or -h", () => {
+  assert.equal(wantsHelp(["--help"]), true);
+  assert.equal(wantsHelp(["-h"]), true);
+  assert.equal(wantsHelp(["--task", "code", "do it"]), false);
+  assert.equal(wantsHelp([]), false);
+});
+
+test("HELP mentions every flag and the exit-code contract", () => {
+  for (const needle of ["--task", "--family", "--config", "--help", "NANOGPT_API_KEY", "exit", "prompt"]) {
+    assert.ok(HELP.includes(needle), `HELP missing ${needle}`);
+  }
 });
 
 test("run resolves candidates with no catalog (no api key)", async () => {

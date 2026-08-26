@@ -74,7 +74,7 @@ The prompt may be a positional argument, `-` to read stdin, or piped stdin. It a
 stdin, never argv — a large prompt on argv would exceed `MAX_ARG_STRLEN` and `E2BIG` at spawn.
 
 ```
-pykrete [--task <task>] [--family <family>] [--config <path>] "<prompt>"
+pykrete [--task <task>] [--family <family>] [--config <path>] [--help] "<prompt>"
 ```
 
 `--family` selects a candidate chain from `[families]`; `--task` selects that family's lead model

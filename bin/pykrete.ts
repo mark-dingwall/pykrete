@@ -2,7 +2,7 @@
 import { mkdtempSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "../src/cli.ts";
+import { run, HELP, wantsHelp } from "../src/cli.ts";
 import { ConfigError } from "../src/config.ts";
 import { FamilyError } from "../src/args.ts";
 import { buildModelsJson, buildSettingsJson, createAgentDir } from "../src/agentdir.ts";
@@ -38,6 +38,10 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<number> {
+  if (wantsHelp(process.argv.slice(2))) {
+    process.stdout.write(HELP);
+    return 0;
+  }
   // An empty shell export counts as "existing" to loadEnvFile and would silently block a valid
   // .env value below, then fail with a misleading "not set" message. Treat empty as absent. Must
   // precede loadEnvFile(): it treats an already-present (even empty) shell value as set and won't
