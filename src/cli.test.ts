@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgv, run, wantsHelp, HELP } from "./cli.ts";
+import { ConfigError } from "./config.ts";
 
 function writeConfig(): string {
   const dir = mkdtempSync(join(tmpdir(), "pykrete-cli-"));
@@ -30,7 +31,16 @@ test("parseArgv extracts flags and the positional prompt", () => {
   assert.equal(p.task, "code");
   assert.equal(p.family, "glm");
   assert.equal(p.prompt, "write a test");
-  assert.equal(p.configPath, "pykrete.toml");
+  assert.equal(p.configPath, undefined);
+});
+
+test("parseArgv rejects value-taking options without an operand", () => {
+  for (const option of ["--task", "--family", "--config"]) {
+    assert.throws(
+      () => parseArgv([option]),
+      (err) => err instanceof ConfigError && err.message === `${option} requires a value`,
+    );
+  }
 });
 
 test("wantsHelp is true for --help or -h", () => {
@@ -40,9 +50,29 @@ test("wantsHelp is true for --help or -h", () => {
   assert.equal(wantsHelp([]), false);
 });
 
-test("HELP mentions every flag and the exit-code contract", () => {
-  for (const needle of ["--task", "--family", "--config", "--help", "NANOGPT_API_KEY", "exit", "prompt"]) {
+test("HELP mentions every flag, configuration environment variable, and the exit-code contract", () => {
+  for (const needle of ["--task", "--family", "--config", "--help", "NANOGPT_API_KEY", "PYKRETE_CONFIG", "exit", "prompt"]) {
     assert.ok(HELP.includes(needle), `HELP missing ${needle}`);
+  }
+});
+
+test("run uses PYKRETE_CONFIG when --config is omitted", async () => {
+  const config = writeConfig();
+  const previous = process.env.PYKRETE_CONFIG;
+  const previousCwd = process.cwd();
+  process.env.PYKRETE_CONFIG = config;
+  process.chdir(mkdtempSync(join(tmpdir(), "pykrete-cwd-")));
+  try {
+    const r = await run([], {
+      apiKey: undefined,
+      cacheDir: mkdtempSync(join(tmpdir(), "pykrete-cache-")),
+      warn: () => {},
+    });
+    assert.equal(r.family, "glm");
+  } finally {
+    process.chdir(previousCwd);
+    if (previous === undefined) delete process.env.PYKRETE_CONFIG;
+    else process.env.PYKRETE_CONFIG = previous;
   }
 });
 

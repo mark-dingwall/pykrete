@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, mkdirSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, HELP, wantsHelp } from "../src/cli.ts";
@@ -10,6 +10,7 @@ import { launchAttempt, type HeartbeatInfo } from "../src/launch.ts";
 import { runFailover } from "../src/failover.ts";
 import { runCandidate } from "../src/runCandidate.ts";
 import { probeNanoGpt } from "../src/reachability.ts";
+import { globalCredentialsPath } from "../src/paths.ts";
 
 // Opt-in liveness for programmatic callers; off by default so interactive use stays quiet.
 function heartbeatMsFromEnv(): number | undefined {
@@ -48,23 +49,58 @@ async function main(): Promise<number> {
   // overwrite it from .env.
   if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
   const preEnvKeys = new Set(Object.keys(process.env));
-  try {
-    process.loadEnvFile();
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error(`pykrete: failed to load .env: ${(err as Error).message}`);
-      return 2;
+  if (!process.env.NANOGPT_API_KEY) {
+    try {
+      process.loadEnvFile();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`pykrete: failed to load .env: ${(err as Error).message}`);
+        return 2;
+      }
+      // no .env in cwd; NANOGPT_API_KEY may come from the XDG credentials file below
     }
-    // no .env in cwd; NANOGPT_API_KEY must already be exported
   }
   // .env may only supply NANOGPT_API_KEY; strip any other var it introduced so a .env
   // cannot widen the trust surface (e.g. PYKRETE_PI_BIN) or disable PYKRETE_SKIP_KEY_PREFLIGHT.
   for (const key of Object.keys(process.env)) {
     if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
   }
-  if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
-    console.error("pykrete: NANOGPT_API_KEY is not set (checked the environment and .env)");
-    return 2;
+  if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
+  if (!process.env.NANOGPT_API_KEY) {
+    let credentialsPath: string;
+    try {
+      credentialsPath = globalCredentialsPath();
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        console.error(`pykrete: ${err.message}`);
+        return 2;
+      }
+      throw err;
+    }
+    let loadedCredentials = false;
+    try {
+      process.loadEnvFile(credentialsPath);
+      loadedCredentials = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`pykrete: failed to load credentials at ${credentialsPath}: ${(err as Error).message}`);
+        return 2;
+      }
+    }
+    if (loadedCredentials && process.platform !== "win32") {
+      const mode = statSync(credentialsPath).mode & 0o777;
+      if ((mode & 0o077) !== 0) {
+        console.error(`pykrete: credentials file ${credentialsPath} has permissions ${mode.toString(8)}; recommended mode is 600`);
+      }
+    }
+    for (const key of Object.keys(process.env)) {
+      if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
+    }
+    if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
+    if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
+      console.error(`pykrete: NANOGPT_API_KEY is not set (checked the environment, .env, and ${credentialsPath})`);
+      return 2;
+    }
   }
 
   let resolved;

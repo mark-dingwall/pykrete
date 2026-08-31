@@ -1,11 +1,12 @@
-# Pykrete config. Copy to `pykrete.toml` in the directory you run from, or pass
-# `--config <path>`. Without it, Pykrete exits 2 with "cannot read config at pykrete.toml".
+# Pykrete config. Copy to `$XDG_CONFIG_HOME/pykrete/pykrete.toml` when XDG_CONFIG_HOME
+# is absolute, otherwise `$HOME/.config/pykrete/pykrete.toml`; or use a working-directory
+# `pykrete.toml` or pass `--config <path>`.
 #
 # PREREQUISITES
 #   1. `pi` on PATH (npm i -g @earendil-works/pi-coding-agent@~0.84.3), or set PYKRETE_PI_BIN.
-#   2. NANOGPT_API_KEY exported in the environment, or set in a `.env` file in this directory
-#      (see .env.example) — Pykrete reads `.env` automatically; a non-empty shell env still wins
-#      if both are set. A missing key exits 2 with a clear message.
+#   2. NANOGPT_API_KEY exported in the environment, set in `.env` in the working directory,
+#      or set in `credentials.env` beside the global config above (see .env.example). The first
+#      non-empty value wins. A missing key exits 2 with a clear message.
 #
 # Invocation: pykrete [--task <task>] [--family <family>] [--config <path>] "<prompt>"
 

@@ -1,9 +1,10 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, type LivenessConfig, type RetryConfig } from "./config.ts";
+import { ConfigError, loadConfig, type LivenessConfig, type RetryConfig } from "./config.ts";
 import { resolveArgs } from "./args.ts";
 import { buildCandidates, type Resolution } from "./resolve.ts";
 import { intersects, loadCatalog, reorder } from "./catalog.ts";
+import { resolveConfigPath } from "./paths.ts";
 
 export const HELP = `Usage: pykrete [--task <task>] [--family <family>] [--config <path>] [--help] "<prompt>"
 
@@ -20,7 +21,8 @@ Options:
                     Default: "general".
   --family <family>  Select a candidate chain from [families].
                     Default: the \`default_family\` in pykrete.toml.
-  --config <path>    Path to pykrete.toml. Default: pykrete.toml in the cwd.
+  --config <path>    Path to pykrete.toml. Default: PYKRETE_CONFIG, then
+                    pykrete.toml in the cwd, then the XDG user config.
   -h, --help         Show this help and exit 0.
 
 Exit codes (frozen): {0, 3} success, {1, 2, 4} failure.
@@ -32,7 +34,8 @@ Exit codes (frozen): {0, 3} success, {1, 2, 4} failure.
 
 Environment:
   NANOGPT_API_KEY             Required. From the shell env or a .env file in the cwd
-                              (a non-empty shell value wins if both are set).
+                              or XDG user credentials (first non-empty value wins).
+  PYKRETE_CONFIG              Default config path when --config is omitted.
   PYKRETE_PI_BIN              Override the pi binary (default: pi on PATH).
   PYKRETE_HEARTBEAT_SECONDS   Emit periodic JSON progress lines to stderr.
   PYKRETE_MODELS_URL          Test seam for the catalog endpoint. Unset = production.
@@ -49,19 +52,23 @@ export interface ParsedArgv {
   task?: string;
   family?: string;
   prompt?: string;
-  configPath: string;
+  configPath?: string;
 }
 
 export function parseArgv(argv: string[]): ParsedArgv {
   let task: string | undefined;
   let family: string | undefined;
-  let configPath = "pykrete.toml";
+  let configPath: string | undefined;
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--task") task = argv[++i];
-    else if (a === "--family") family = argv[++i];
-    else if (a === "--config") configPath = argv[++i];
+    if (a === "--task" || a === "--family" || a === "--config") {
+      const value = argv[++i];
+      if (value === undefined) throw new ConfigError(`${a} requires a value`);
+      if (a === "--task") task = value;
+      else if (a === "--family") family = value;
+      else configPath = value;
+    }
     else positionals.push(a);
   }
   return { task, family, prompt: positionals.length ? positionals.join(" ") : undefined, configPath };
@@ -87,7 +94,7 @@ export async function run(argv: string[], deps: RunDeps = {}): Promise<RunResult
   const warn = deps.warn ?? ((m: string) => console.error(m));
   const parsed = parseArgv(argv);
 
-  const config = loadConfig(parsed.configPath);
+  const config = loadConfig(resolveConfigPath(parsed.configPath));
   const { task, family, warnings } = resolveArgs(config, parsed.task, parsed.family);
   for (const w of warnings) warn(`pykrete: ${w}`);
 
