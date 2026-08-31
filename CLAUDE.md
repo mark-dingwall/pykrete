@@ -43,19 +43,21 @@ overriding `edit` and you get no error — just the built-in behaviour back, qui
 family from `src/cli.ts`, threaded down through `bin/pykrete.ts`). It overrides pi's built-in `edit`
 tool (nested `edits[].oldText` schema, which DeepSeek-via-NanoGPT deterministically fails) with a
 flat-string schema. Gating on family rather than a `candidate.startsWith("deepseek/")` id check
-matters: the deepseek family's own lead candidate, `TEE/deepseek-v4-pro:thinking`, doesn't start
-with `deepseek/` and would silently miss the extension under an id-prefix check. No `--tools`
-allowlist flag is passed, so the "custom tool overrides are silently inactive unless the tool stays
-in the allowlist" tripwire above doesn't apply here.
+matters: family membership is the stable routing decision, while catalog ids and aliases move and
+need not start with `deepseek/`. The launch tests include a non-`deepseek/` alias for this reason. No
+`--tools` allowlist flag is passed, so the "custom tool overrides are silently inactive unless the
+tool stays in the allowlist" tripwire above doesn't apply here.
 
 **`bin/pykrete.ts` loads credential env files, but only on the CLI path.** It checks a non-empty shell
 `NANOGPT_API_KEY`, cwd `.env`, then the XDG user `pykrete/credentials.env`, and preflights the result,
 exiting 2 with a clear message if all are absent. Empty values fall through. Each file may introduce
-only `NANOGPT_API_KEY`; other variables are stripped. The global file gets a POSIX mode warning when
-group/other bits are present. This check is deliberately unconditional, not scoped by
-`PYKRETE_PI_BIN`: every invocation talks to NanoGPT regardless of which `pi` binary is spawned
-(`agentdir.ts` hardcodes the `nanogpt` provider into `models.json` either way), so a substituted
-binary is not exempt from needing a real key. The e2e suite (`classify.e2e.test.ts`,
+only `NANOGPT_API_KEY`; other variables are stripped. When loaded, the global file gets a POSIX mode
+warning if group/other bits are present. Once a source wins, lower-priority files and even their paths
+are not inspected; do not resolve `globalCredentialsPath()` eagerly, because a valid shell/cwd key
+must not depend on a usable XDG/HOME fallback. The final key check is deliberately unconditional,
+not scoped by `PYKRETE_PI_BIN`: every invocation talks to NanoGPT regardless of which `pi` binary
+is spawned (`agentdir.ts` hardcodes the `nanogpt` provider into `models.json` either way), so a
+substituted binary is not exempt from needing a real key. The e2e suite (`classify.e2e.test.ts`,
 `config.e2e.test.ts`) reads `NANOGPT_API_KEY`/`PYKRETE_NANOGPT_API_KEY` straight from `process.env` and
 never goes through `bin/pykrete.ts`, so `.env` support does **not** reach it — the key must still be
 exported directly in the shell for `npm run test:e2e`.
@@ -75,7 +77,8 @@ returns 200 for a bogus key, so it can never validate credentials.
 ## Conventions
 
 Node ≥ 22.18 native TypeScript (`--experimental-strip-types`), ESM, `node:test` +
-`node:assert/strict`. `smol-toml` is the only runtime dependency — keep it that way.
+`node:assert/strict`. Runtime dependencies are limited to `smol-toml` and `typebox`; keep additions
+deliberate and minimal.
 
 Tests assert observable behaviour at the boundary. Derive them from intended behaviour, not from the
 implementation; a test that cannot fail is worse than no test. The e2e suite is the standing example

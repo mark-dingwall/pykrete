@@ -53,9 +53,9 @@ npm i
 npm link       # puts `pykrete` on PATH
 ```
 
-Or, without installing: `npx github:mark-dingwall/pykrete "<prompt>"` — re-fetches on every run unless
-pinned to a tag. It still needs a config and key (see Quickstart below); npx does not install
-`pykrete.example.toml` or `.env.example`, so fetch those from the repo yourself first.
+Packaged/npm-installed execution is not supported yet: Node refuses native TypeScript stripping
+beneath `node_modules`. Use the source checkout with `npm link` above; the packaging gap is tracked
+in the [backlog](docs/BACKLOG.md).
 
 ## Quickstart
 
@@ -73,11 +73,11 @@ pykrete "Write hello.txt containing PONG."
 
 Project-local `pykrete.toml` and `.env` files remain supported. Config lookup is `--config`, then a
 non-empty shell `PYKRETE_CONFIG`, then `pykrete.toml` in the working directory, then
-`${XDG_CONFIG_HOME:-~/.config}/pykrete/pykrete.toml`. API-key lookup is a non-empty shell
-`NANOGPT_API_KEY`, then `.env` in the working directory, then
-`${XDG_CONFIG_HOME:-~/.config}/pykrete/credentials.env`. Empty values are treated as absent and fall
-through to the next source. `XDG_CONFIG_HOME` is used only when it is an absolute path; an unset,
-empty, or relative value falls back to `~/.config`.
+`$XDG_CONFIG_HOME/pykrete/pykrete.toml` when `XDG_CONFIG_HOME` is absolute, otherwise
+`$HOME/.config/pykrete/pykrete.toml`. API-key lookup is a non-empty shell `NANOGPT_API_KEY`, then
+`.env` in the working directory, then the corresponding global `credentials.env`. Empty values fall
+through; lookup stops at the first non-empty key, without resolving or inspecting lower-priority
+credential paths.
 
 The global credential file is plaintext. Keep it out of dotfile repositories and restrict it to the
 owner with `chmod 600`. On POSIX systems Pykrete warns, but continues, when group or other permission
@@ -121,8 +121,8 @@ message's `stopReason`, never on pi's exit code.
 | `PYKRETE_MODELS_URL` | Test seam for the catalog endpoint. Unset = production. |
 | `PYKRETE_SKIP_KEY_PREFLIGHT` | Test seam to bypass the `NANOGPT_API_KEY` preflight. Unset = production. |
 
-A missing API key fails cleanly: Pykrete checks all three sources before doing anything else and
-exits 2 with a message that includes the global credential path.
+A missing API key fails cleanly: Pykrete checks each source in precedence order and exits 2 with a
+message that includes the global credential path after all sources are exhausted.
 
 ## Tests
 
@@ -141,7 +141,8 @@ it could report "all pass" while executing nothing at all. One further case is g
 
 ```
 bin/pykrete.ts     CLI entry — argv, stdin, exit codes
-src/config.ts      pykrete.toml parsing         src/resolve.ts     family → candidate chain
+src/config.ts      pykrete.toml parsing         src/paths.ts       config/credential discovery
+src/resolve.ts     family → candidate chain
 src/catalog.ts     NanoGPT model catalog        src/agentdir.ts    temp PI_CODING_AGENT_DIR
 src/launch.ts      spawn pi, watchdogs          src/pi-events.ts   --mode json stream accumulator
 src/classify.ts    outcome → verdict            src/failover.ts    candidate loop → exit code
@@ -150,7 +151,7 @@ docs/BACKLOG.md    known gaps        docs/superpowers/  specs and plans
 extensions/        pi extensions (flat-edit — wired in for the resolved `deepseek` family only)
 ```
 
-Only `smol-toml` is a runtime dependency.
+Runtime dependencies are `smol-toml` (TOML parsing) and `typebox` (the flat-edit tool schema).
 
 ## License
 
