@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, type LivenessConfig, type RetryConfig } from "./config.ts";
+import { ConfigError, loadConfig, type LivenessConfig, type RetryConfig } from "./config.ts";
 import { resolveArgs } from "./args.ts";
 import { buildCandidates, type Resolution } from "./resolve.ts";
 import { intersects, loadCatalog, reorder } from "./catalog.ts";
@@ -62,9 +62,13 @@ export function parseArgv(argv: string[]): ParsedArgv {
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--task") task = argv[++i];
-    else if (a === "--family") family = argv[++i];
-    else if (a === "--config") configPath = argv[++i];
+    if (a === "--task" || a === "--family" || a === "--config") {
+      const value = argv[++i];
+      if (value === undefined) throw new ConfigError(`${a} requires a value`);
+      if (a === "--task") task = value;
+      else if (a === "--family") family = value;
+      else configPath = value;
+    }
     else positionals.push(a);
   }
   return { task, family, prompt: positionals.length ? positionals.join(" ") : undefined, configPath };

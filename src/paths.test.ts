@@ -6,6 +6,7 @@ import {
   resolveConfigPath,
   xdgConfigHome,
 } from "./paths.ts";
+import { ConfigError } from "./config.ts";
 
 test("xdgConfigHome uses an absolute XDG_CONFIG_HOME", () => {
   assert.equal(
@@ -23,6 +24,15 @@ test("xdgConfigHome falls back for unset, empty, or relative XDG_CONFIG_HOME", (
   }
 });
 
+test("xdgConfigHome rejects an empty or relative fallback home", () => {
+  for (const homeDir of ["", "relative/home"]) {
+    assert.throws(
+      () => xdgConfigHome({ env: {}, homeDir }),
+      (err) => err instanceof ConfigError && /absolute home directory/.test(err.message),
+    );
+  }
+});
+
 test("global Pykrete paths share the resolved XDG directory", () => {
   const options = { env: { XDG_CONFIG_HOME: "/custom/config" }, homeDir: "/ignored" };
   assert.equal(globalConfigPath(options), "/custom/config/pykrete/pykrete.toml");
@@ -35,7 +45,7 @@ test("resolveConfigPath gives an explicit CLI path highest precedence even when 
       env: { PYKRETE_CONFIG: "from-env.toml", XDG_CONFIG_HOME: "/global" },
       cwd: "/project",
       homeDir: "/home/tester",
-      existsSync: () => true,
+      statSync: () => undefined,
     }),
     "missing-explicit.toml",
   );
@@ -47,7 +57,7 @@ test("resolveConfigPath uses a non-empty PYKRETE_CONFIG before cwd", () => {
       env: { PYKRETE_CONFIG: "from-env.toml", XDG_CONFIG_HOME: "/global" },
       cwd: "/project",
       homeDir: "/home/tester",
-      existsSync: () => true,
+      statSync: () => undefined,
     }),
     "from-env.toml",
   );
@@ -59,7 +69,9 @@ test("resolveConfigPath uses cwd pykrete.toml when no explicit source is set", (
       env: { XDG_CONFIG_HOME: "/global" },
       cwd: "/project",
       homeDir: "/home/tester",
-      existsSync: (path) => path === "/project/pykrete.toml",
+      statSync: (path) => {
+        if (path !== "/project/pykrete.toml") throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
     }),
     "/project/pykrete.toml",
   );
@@ -71,8 +83,35 @@ test("resolveConfigPath falls back to the global path when cwd has no config", (
       env: { PYKRETE_CONFIG: "", XDG_CONFIG_HOME: "/global" },
       cwd: "/project",
       homeDir: "/home/tester",
-      existsSync: () => false,
+      statSync: () => {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
     }),
     "/global/pykrete/pykrete.toml",
+  );
+});
+
+test("resolveConfigPath normalizes cwd lookup failures", () => {
+  assert.throws(
+    () => resolveConfigPath(undefined, {
+      env: { XDG_CONFIG_HOME: "/global" },
+      cwdFn: () => {
+        throw Object.assign(new Error("working directory was removed"), { code: "ENOENT" });
+      },
+    }),
+    (err) => err instanceof ConfigError && /cannot resolve working directory/.test(err.message),
+  );
+});
+
+test("resolveConfigPath fails closed when the local config cannot be inspected", () => {
+  assert.throws(
+    () => resolveConfigPath(undefined, {
+      env: { XDG_CONFIG_HOME: "/global" },
+      cwd: "/project",
+      statSync: () => {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      },
+    }),
+    (err) => err instanceof ConfigError && /cannot inspect local config/.test(err.message),
   );
 });

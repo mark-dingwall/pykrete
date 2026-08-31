@@ -1,7 +1,12 @@
 // src/bin.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync, spawn, type SpawnSyncReturns } from "node:child_process";
+import {
+  spawnSync as nodeSpawnSync,
+  spawn,
+  type SpawnSyncOptionsWithStringEncoding,
+  type SpawnSyncReturns,
+} from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -34,8 +39,27 @@ function writeConfig(glm: string[]): string {
 function writeConfigAt(path: string, glm: string[]): void {
   writeFileSync(
     path,
-    ['default_family = "glm"', "[families]", `glm = [${glm.map((s) => `"${s}"`).join(", ")}]`, "[liveness]", "nonce_enabled = false"].join("\n"),
+    [
+      'default_family = "glm"',
+      "[families]",
+      `glm = [${glm.map((s) => `"${s}"`).join(", ")}]`,
+      "[liveness]",
+      "nonce_enabled = false",
+      "probe_timeout_seconds = 1",
+      "[retry]",
+      "outage_backoff_base_ms = 1",
+      "outage_backoff_cap_ms = 1",
+      "max_outage_retries = 0",
+    ].join("\n"),
   );
+}
+
+function spawnSync(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptionsWithStringEncoding,
+): SpawnSyncReturns<string> {
+  return nodeSpawnSync(command, args, { ...options, timeout: 10_000 });
 }
 
 // NANOGPT_API_KEY="" forces loadCatalog to skip its fetch (no network in tests); fake-pi ignores
@@ -110,6 +134,27 @@ test("missing prompt: exit 2", () => {
     { input: "", encoding: "utf-8", cwd: dirname(configPath), env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
   );
   assert.equal(r.status, 2);
+});
+
+test("trailing --config without an operand exits 2", () => {
+  const configPath = writeConfig(["good-ok"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "do it", "--config"],
+    {
+      encoding: "utf-8",
+      cwd: dirname(configPath),
+      env: {
+        ...process.env,
+        PYKRETE_PI_BIN: FAKE,
+        NANOGPT_API_KEY: "",
+        PYKRETE_SKIP_KEY_PREFLIGHT: "1",
+        XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "pykrete-xdg-empty-")),
+      },
+    },
+  );
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--config requires a value/);
 });
 
 test("large prompt via stdin '-' reaches pi intact (no E2BIG), exit 0", () => {
@@ -207,6 +252,28 @@ test("no NANOGPT_API_KEY, no .env in cwd: exit 2", () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /NANOGPT_API_KEY/);
   assert.match(r.stderr, /credentials\.env/);
+});
+
+test("relative fallback HOME exits 2 with a configuration error", () => {
+  const configPath = writeConfig(["good-ok"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    {
+      encoding: "utf-8",
+      timeout: 5_000,
+      cwd: dirname(configPath),
+      env: {
+        ...process.env,
+        HOME: "relative-home",
+        XDG_CONFIG_HOME: "relative-config",
+        NANOGPT_API_KEY: "",
+        PYKRETE_SKIP_KEY_PREFLIGHT: "1",
+      },
+    },
+  );
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /expected an absolute home directory/);
 });
 
 test("XDG user config and credentials supply both defaults from an empty cwd", () => {

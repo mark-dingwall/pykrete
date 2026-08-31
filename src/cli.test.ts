@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgv, run, wantsHelp, HELP } from "./cli.ts";
+import { ConfigError } from "./config.ts";
 
 function writeConfig(): string {
   const dir = mkdtempSync(join(tmpdir(), "pykrete-cli-"));
@@ -31,6 +32,15 @@ test("parseArgv extracts flags and the positional prompt", () => {
   assert.equal(p.family, "glm");
   assert.equal(p.prompt, "write a test");
   assert.equal(p.configPath, undefined);
+});
+
+test("parseArgv rejects value-taking options without an operand", () => {
+  for (const option of ["--task", "--family", "--config"]) {
+    assert.throws(
+      () => parseArgv([option]),
+      (err) => err instanceof ConfigError && err.message === `${option} requires a value`,
+    );
+  }
 });
 
 test("wantsHelp is true for --help or -h", () => {
