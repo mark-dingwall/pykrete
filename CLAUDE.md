@@ -48,10 +48,11 @@ with `deepseek/` and would silently miss the extension under an id-prefix check.
 allowlist flag is passed, so the "custom tool overrides are silently inactive unless the tool stays
 in the allowlist" tripwire above doesn't apply here.
 
-**`bin/pykrete.ts` loads `.env`, but only the CLI path.** It calls `process.loadEnvFile()` before
-anything else and preflights `NANOGPT_API_KEY`, exiting 2 with a clear message if it's absent — a
-non-empty shell env still wins if both are set (an empty shell export is treated as absent, so it
-doesn't silently shadow a valid `.env` value). This check is deliberately unconditional, not scoped by
+**`bin/pykrete.ts` loads credential env files, but only on the CLI path.** It checks a non-empty shell
+`NANOGPT_API_KEY`, cwd `.env`, then the XDG user `pykrete/credentials.env`, and preflights the result,
+exiting 2 with a clear message if all are absent. Empty values fall through. Each file may introduce
+only `NANOGPT_API_KEY`; other variables are stripped. The global file gets a POSIX mode warning when
+group/other bits are present. This check is deliberately unconditional, not scoped by
 `PYKRETE_PI_BIN`: every invocation talks to NanoGPT regardless of which `pi` binary is spawned
 (`agentdir.ts` hardcodes the `nanogpt` provider into `models.json` either way), so a substituted
 binary is not exempt from needing a real key. The e2e suite (`classify.e2e.test.ts`,

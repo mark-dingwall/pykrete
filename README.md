@@ -54,21 +54,31 @@ npm link       # puts `pykrete` on PATH
 ```
 
 Or, without installing: `npx github:mark-dingwall/pykrete "<prompt>"` — re-fetches on every run unless
-pinned to a tag, and still needs a `pykrete.toml` and a key in the directory you run it from (see
-Quickstart below); npx does not put `pykrete.example.toml` or `.env.example` in your cwd, so fetch
-those from the repo yourself first.
+pinned to a tag. It still needs a config and key (see Quickstart below); npx does not install
+`pykrete.example.toml` or `.env.example`, so fetch those from the repo yourself first.
 
 ## Quickstart
 
 ```bash
 npm i -g @earendil-works/pi-coding-agent@~0.84.3   # pi must be on PATH
-cp pykrete.example.toml pykrete.toml               # config is required
-cp .env.example .env                               # fill in NANOGPT_API_KEY, or export it directly
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/pykrete"
+mkdir -p "$config_dir"
+cp pykrete.example.toml "$config_dir/pykrete.toml"
+install -m 600 .env.example "$config_dir/credentials.env" # fill in NANOGPT_API_KEY
 pykrete "Write hello.txt containing PONG."
 ```
 
-A non-empty shell env still takes precedence over `.env` if both are set; an empty shell export is
-treated as absent, so it won't silently shadow a valid `.env` value.
+Project-local `pykrete.toml` and `.env` files remain supported. Config lookup is `--config`, then a
+non-empty shell `PYKRETE_CONFIG`, then `pykrete.toml` in the working directory, then
+`${XDG_CONFIG_HOME:-~/.config}/pykrete/pykrete.toml`. API-key lookup is a non-empty shell
+`NANOGPT_API_KEY`, then `.env` in the working directory, then
+`${XDG_CONFIG_HOME:-~/.config}/pykrete/credentials.env`. Empty values are treated as absent and fall
+through to the next source.
+
+The global credential file is plaintext. Keep it out of dotfile repositories and restrict it to the
+owner with `chmod 600`. On POSIX systems Pykrete warns, but continues, when group or other permission
+bits are present. Both credential files may supply only `NANOGPT_API_KEY`; other variables from them
+are ignored.
 
 The prompt may be a positional argument, `-` to read stdin, or piped stdin. It always reaches pi via
 stdin, never argv — a large prompt on argv would exceed `MAX_ARG_STRLEN` and `E2BIG` at spawn.
@@ -100,14 +110,15 @@ message's `stopReason`, never on pi's exit code.
 
 | Variable | Purpose |
 |----------|---------|
-| `NANOGPT_API_KEY` | Required. From the shell environment or a `.env` file in the working directory (a non-empty shell value wins if both are set). |
+| `NANOGPT_API_KEY` | Required. First non-empty value from the shell, cwd `.env`, or XDG user `credentials.env`. |
+| `PYKRETE_CONFIG` | Default config path when `--config` is omitted. An empty value is ignored. |
 | `PYKRETE_PI_BIN` | Override the `pi` binary (default: `pi` on `PATH`). |
 | `PYKRETE_HEARTBEAT_SECONDS` | Emit a periodic JSON progress line to stderr (`{"pykrete":"heartbeat",...}`). |
 | `PYKRETE_MODELS_URL` | Test seam for the catalog endpoint. Unset = production. |
 | `PYKRETE_SKIP_KEY_PREFLIGHT` | Test seam to bypass the `NANOGPT_API_KEY` preflight. Unset = production. |
 
-A missing API key now fails cleanly: Pykrete checks for it (after attempting to load `.env`) before
-doing anything else, and exits 2 with a clear message if it's absent.
+A missing API key fails cleanly: Pykrete checks all three sources before doing anything else and
+exits 2 with a message that includes the global credential path.
 
 ## Tests
 

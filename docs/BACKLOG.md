@@ -14,6 +14,10 @@ Still outstanding from that design:
 
 ## Setup / operability
 (2026-07-21, found while bringing a clean host up to a working state.)
+- **Native Windows and macOS user-config locations.** The XDG-defaults MVP deliberately uses an
+  absolute `XDG_CONFIG_HOME` or `~/.config` on every platform. Before adding `%APPDATA%` on Windows
+  or Application Support on macOS, define precedence and migration behavior so existing XDG users
+  do not silently switch config or credentials. (2026-08-31, XDG-defaults implementation.)
 - **`pi` is an undeclared runtime dependency.** `launch.ts` resolves a bare `"pi"` on PATH (or
   `PYKRETE_PI_BIN`); nothing in `package.json` declares or version-checks it. The four pi contracts
   support the **~0.84.3** line and are verified against exact **0.84.3** — a host outside that line

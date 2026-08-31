@@ -27,11 +27,15 @@ chmodSync(FAKE, 0o755);
 function writeConfig(glm: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), "pykrete-bin-"));
   const path = join(dir, "pykrete.toml");
+  writeConfigAt(path, glm);
+  return path;
+}
+
+function writeConfigAt(path: string, glm: string[]): void {
   writeFileSync(
     path,
     ['default_family = "glm"', "[families]", `glm = [${glm.map((s) => `"${s}"`).join(", ")}]`, "[liveness]", "nonce_enabled = false"].join("\n"),
   );
-  return path;
 }
 
 // NANOGPT_API_KEY="" forces loadCatalog to skip its fetch (no network in tests); fake-pi ignores
@@ -42,7 +46,7 @@ function runBin(config: string, prompt: string): SpawnSyncReturns<string> {
   return spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", config, prompt],
-    { encoding: "utf-8", cwd: dirname(config), env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
+    { encoding: "utf-8", cwd: dirname(config), env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1", XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "pykrete-xdg-empty-")) } },
   );
 }
 
@@ -50,7 +54,7 @@ function runBinStdin(config: string, input: string): SpawnSyncReturns<string> {
   return spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", config, "-"],
-    { input, encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, cwd: dirname(config), env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1" } },
+    { input, encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, cwd: dirname(config), env: { ...process.env, PYKRETE_PI_BIN: FAKE, NANOGPT_API_KEY: "", PYKRETE_SKIP_KEY_PREFLIGHT: "1", XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "pykrete-xdg-empty-")) } },
   );
 }
 
@@ -198,10 +202,75 @@ test("no NANOGPT_API_KEY, no .env in cwd: exit 2", () => {
   const r = spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
-    { encoding: "utf-8", env: rest, cwd: dirname(configPath) },
+    { encoding: "utf-8", env: { ...rest, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "pykrete-xdg-empty-")) }, cwd: dirname(configPath) },
   );
   assert.equal(r.status, 2);
   assert.match(r.stderr, /NANOGPT_API_KEY/);
+  assert.match(r.stderr, /credentials\.env/);
+});
+
+test("XDG user config and credentials supply both defaults from an empty cwd", () => {
+  const { NANOGPT_API_KEY, PYKRETE_CONFIG, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const key = "envkey-fromxdg";
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-emptycwd-"));
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(pykreteDir, { recursive: true });
+  writeConfigAt(join(pykreteDir, "pykrete.toml"), ["dumpenv"]);
+  const credentials = join(pykreteDir, "credentials.env");
+  writeFileSync(credentials, `NANOGPT_API_KEY=${key}\n`);
+  chmodSync(credentials, 0o600);
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: {
+        ...rest,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CONFIG_HOME: xdgRoot,
+        XDG_CACHE_HOME: seedCatalogCache(key),
+      },
+    },
+  );
+
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
+  assert.doesNotMatch(r.stderr, /recommended mode is 600/);
+});
+
+test("cwd .env wins over XDG credentials without inspecting the unused global file", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const cwdKey = "envkey-fromcwd";
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  writeFileSync(join(cwd, ".env"), `NANOGPT_API_KEY=${cwdKey}\n`);
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(pykreteDir, { recursive: true });
+  const credentials = join(pykreteDir, "credentials.env");
+  writeFileSync(credentials, "NANOGPT_API_KEY=envkey-fromxdg\n");
+  chmodSync(credentials, 0o644);
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", writeConfig(["dumpenv"]), "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: {
+        ...rest,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CONFIG_HOME: xdgRoot,
+        XDG_CACHE_HOME: seedCatalogCache(cwdKey),
+      },
+    },
+  );
+
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${cwdKey}\\b`));
+  assert.doesNotMatch(r.stderr, /recommended mode is 600/);
 });
 
 test(".env in cwd supplies NANOGPT_API_KEY and it reaches the launched pi", () => {
@@ -334,4 +403,113 @@ test("empty shell NANOGPT_API_KEY does not shadow a valid .env value", () => {
   );
   assert.equal(r.status, 0);
   assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
+});
+
+test("empty NANOGPT_API_KEY in cwd .env falls through to XDG credentials", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const key = "envkey-afteremptycwd";
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  writeFileSync(join(cwd, ".env"), "NANOGPT_API_KEY=\n");
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(pykreteDir, { recursive: true });
+  const credentials = join(pykreteDir, "credentials.env");
+  writeFileSync(credentials, `NANOGPT_API_KEY=${key}\n`);
+  chmodSync(credentials, 0o600);
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", writeConfig(["dumpenv"]), "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: {
+        ...rest,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CONFIG_HOME: xdgRoot,
+        XDG_CACHE_HOME: seedCatalogCache(key),
+      },
+    },
+  );
+
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
+});
+
+test("XDG credentials cannot set PYKRETE_SKIP_KEY_PREFLIGHT", () => {
+  const { NANOGPT_API_KEY, PYKRETE_CONFIG, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-emptycwd-"));
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(pykreteDir, { recursive: true });
+  const credentials = join(pykreteDir, "credentials.env");
+  writeFileSync(credentials, "PYKRETE_SKIP_KEY_PREFLIGHT=1\n");
+  chmodSync(credentials, 0o600);
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", writeConfig(["good-ok"]), "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: { ...rest, PYKRETE_PI_BIN: FAKE, XDG_CONFIG_HOME: xdgRoot },
+    },
+  );
+
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /NANOGPT_API_KEY/);
+});
+
+test("broad POSIX permissions on XDG credentials warn but do not block the run", {
+  skip: process.platform === "win32",
+}, () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const key = "envkey-broadmode";
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-emptycwd-"));
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(pykreteDir, { recursive: true });
+  const credentials = join(pykreteDir, "credentials.env");
+  writeFileSync(credentials, `NANOGPT_API_KEY=${key}\n`);
+  chmodSync(credentials, 0o644);
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", writeConfig(["dumpenv"]), "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: {
+        ...rest,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CONFIG_HOME: xdgRoot,
+        XDG_CACHE_HOME: seedCatalogCache(key),
+      },
+    },
+  );
+
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
+  assert.match(r.stderr, /permissions 644; recommended mode is 600/);
+});
+
+test("unreadable XDG credentials exit 2 with the failing path", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const cwd = mkdtempSync(join(tmpdir(), "pykrete-emptycwd-"));
+  const xdgRoot = mkdtempSync(join(tmpdir(), "pykrete-xdg-"));
+  const pykreteDir = join(xdgRoot, "pykrete");
+  mkdirSync(join(pykreteDir, "credentials.env"), { recursive: true });
+
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", writeConfig(["good-ok"]), "do it"],
+    {
+      encoding: "utf-8",
+      cwd,
+      env: { ...rest, PYKRETE_PI_BIN: FAKE, XDG_CONFIG_HOME: xdgRoot },
+    },
+  );
+
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, new RegExp(`failed to load credentials at ${xdgRoot}/pykrete/credentials\\.env`));
 });
