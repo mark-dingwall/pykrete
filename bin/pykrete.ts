@@ -66,17 +66,17 @@ async function main(): Promise<number> {
     if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
   }
   if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
-  let credentialsPath: string;
-  try {
-    credentialsPath = globalCredentialsPath();
-  } catch (err) {
-    if (err instanceof ConfigError) {
-      console.error(`pykrete: ${err.message}`);
-      return 2;
-    }
-    throw err;
-  }
   if (!process.env.NANOGPT_API_KEY) {
+    let credentialsPath: string;
+    try {
+      credentialsPath = globalCredentialsPath();
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        console.error(`pykrete: ${err.message}`);
+        return 2;
+      }
+      throw err;
+    }
     let loadedCredentials = false;
     try {
       process.loadEnvFile(credentialsPath);
@@ -97,10 +97,10 @@ async function main(): Promise<number> {
       if (key !== "NANOGPT_API_KEY" && !preEnvKeys.has(key)) delete process.env[key];
     }
     if (process.env.NANOGPT_API_KEY === "") delete process.env.NANOGPT_API_KEY;
-  }
-  if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
-    console.error(`pykrete: NANOGPT_API_KEY is not set (checked the environment, .env, and ${credentialsPath})`);
-    return 2;
+    if (!process.env.PYKRETE_SKIP_KEY_PREFLIGHT && !process.env.NANOGPT_API_KEY) {
+      console.error(`pykrete: NANOGPT_API_KEY is not set (checked the environment, .env, and ${credentialsPath})`);
+      return 2;
+    }
   }
 
   let resolved;

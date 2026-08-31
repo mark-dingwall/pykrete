@@ -340,7 +340,7 @@ test("cwd .env wins over XDG credentials without inspecting the unused global fi
   assert.doesNotMatch(r.stderr, /recommended mode is 600/);
 });
 
-test(".env in cwd supplies NANOGPT_API_KEY and it reaches the launched pi", () => {
+test("cwd .env key bypasses an invalid global credential home", () => {
   const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
   const key = "envkey-abc123";
   const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
@@ -350,13 +350,23 @@ test(".env in cwd supplies NANOGPT_API_KEY and it reaches the launched pi", () =
   const r = spawnSync(
     "node",
     ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
-    { encoding: "utf-8", cwd: envDir, env: { ...rest, PYKRETE_PI_BIN: FAKE, XDG_CACHE_HOME: cacheRoot } },
+    {
+      encoding: "utf-8",
+      cwd: envDir,
+      env: {
+        ...rest,
+        HOME: "relative-home",
+        XDG_CONFIG_HOME: "relative-config",
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CACHE_HOME: cacheRoot,
+      },
+    },
   );
   assert.equal(r.status, 0);
   assert.match(r.stdout, new RegExp(`ENVKEY=${key}\\b`));
 });
 
-test("shell env NANOGPT_API_KEY wins over a .env value in cwd", () => {
+test("shell env key wins over cwd .env without resolving an invalid global credential home", () => {
   const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
   const shellKey = "envkey-fromshell";
   const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
@@ -369,7 +379,14 @@ test("shell env NANOGPT_API_KEY wins over a .env value in cwd", () => {
     {
       encoding: "utf-8",
       cwd: envDir,
-      env: { ...rest, NANOGPT_API_KEY: shellKey, PYKRETE_PI_BIN: FAKE, XDG_CACHE_HOME: cacheRoot },
+      env: {
+        ...rest,
+        HOME: "relative-home",
+        XDG_CONFIG_HOME: "relative-config",
+        NANOGPT_API_KEY: shellKey,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CACHE_HOME: cacheRoot,
+      },
     },
   );
   assert.equal(r.status, 0);
