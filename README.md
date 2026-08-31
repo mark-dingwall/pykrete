@@ -61,7 +61,10 @@ pinned to a tag. It still needs a config and key (see Quickstart below); npx doe
 
 ```bash
 npm i -g @earendil-works/pi-coding-agent@~0.84.3   # pi must be on PATH
-config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/pykrete"
+case "${XDG_CONFIG_HOME:-}" in
+  /*) config_dir="$XDG_CONFIG_HOME/pykrete" ;;
+  *)  config_dir="$HOME/.config/pykrete" ;;
+esac
 mkdir -p "$config_dir"
 cp pykrete.example.toml "$config_dir/pykrete.toml"
 install -m 600 .env.example "$config_dir/credentials.env" # fill in NANOGPT_API_KEY
@@ -73,7 +76,8 @@ non-empty shell `PYKRETE_CONFIG`, then `pykrete.toml` in the working directory, 
 `${XDG_CONFIG_HOME:-~/.config}/pykrete/pykrete.toml`. API-key lookup is a non-empty shell
 `NANOGPT_API_KEY`, then `.env` in the working directory, then
 `${XDG_CONFIG_HOME:-~/.config}/pykrete/credentials.env`. Empty values are treated as absent and fall
-through to the next source.
+through to the next source. `XDG_CONFIG_HOME` is used only when it is an absolute path; an unset,
+empty, or relative value falls back to `~/.config`.
 
 The global credential file is plaintext. Keep it out of dotfile repositories and restrict it to the
 owner with `chmod 600`. On POSIX systems Pykrete warns, but continues, when group or other permission

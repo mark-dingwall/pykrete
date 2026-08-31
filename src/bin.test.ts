@@ -309,6 +309,30 @@ test("shell env NANOGPT_API_KEY wins over a .env value in cwd", () => {
   assert.match(r.stdout, new RegExp(`ENVKEY=${shellKey}\\b`));
 });
 
+test("shell env NANOGPT_API_KEY bypasses an invalid lower-priority .env", () => {
+  const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, ...rest } = process.env;
+  const shellKey = "envkey-fromshell";
+  const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
+  mkdirSync(join(envDir, ".env"));
+  const configPath = writeConfig(["dumpenv"]);
+  const r = spawnSync(
+    "node",
+    ["--experimental-strip-types", BIN, "--config", configPath, "do it"],
+    {
+      encoding: "utf-8",
+      cwd: envDir,
+      env: {
+        ...rest,
+        NANOGPT_API_KEY: shellKey,
+        PYKRETE_PI_BIN: FAKE,
+        XDG_CACHE_HOME: seedCatalogCache(shellKey),
+      },
+    },
+  );
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, new RegExp(`ENVKEY=${shellKey}\\b`));
+});
+
 test(".env cannot set PYKRETE_SKIP_KEY_PREFLIGHT", () => {
   const { NANOGPT_API_KEY, PYKRETE_SKIP_KEY_PREFLIGHT, PYKRETE_PI_BIN, ...rest } = process.env;
   const envDir = mkdtempSync(join(tmpdir(), "pykrete-envcwd-"));
